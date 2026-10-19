@@ -33,9 +33,9 @@ export const MOVE = {
 // Canonical shoulder camera used for aiming. The client camera starts from the
 // same numbers so the crosshair and the server agree on what is being aimed at.
 export const CAMERA = {
-  distance: 4.2,
-  shoulder: 0.85,
-  height: 1.75,
+  distance: 5.4,
+  shoulder: 0.95,
+  height: 2.05,
   slideDrop: 0.6,
   pitchMin: -1.2,
   pitchMax: 1.1,
