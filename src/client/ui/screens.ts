@@ -108,7 +108,13 @@ export class ClassPickScreen {
       card.addEventListener('click', () => this.onPick?.(id))
       this.cards.set(id, card)
     })
-    const links = el('div', 'mt-8 flex gap-6 text-sm font-semibold text-zinc-400', this.root)
+    el(
+      'div',
+      'mt-6 text-xs font-semibold tracking-wide text-zinc-400',
+      this.root,
+      'WASD move · Space jump · Shift slide · Mouse aim · F1 / F2 focus heal target',
+    )
+    const links = el('div', 'mt-5 flex gap-6 text-sm font-semibold text-zinc-400', this.root)
     this.back = el('button', 'hover:text-white transition', links, 'Back')
     this.trainingLink = el('button', 'hover:text-white transition', links, 'Training (T)')
   }
