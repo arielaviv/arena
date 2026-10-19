@@ -1,5 +1,6 @@
 import { Color, DirectionalLight, Fog, Group, HemisphereLight, type Scene } from 'three'
 import type { WorldGeometry } from '../../shared/sim/geometry'
+import { mergeStatic } from './merge'
 import type { ThemeInstance, WorldTheme } from './themes/common'
 import { OBSIDIAN_CALDERA } from './themes/obsidianCaldera'
 import { SKY_SANCTUM } from './themes/skySanctum'
@@ -44,13 +45,14 @@ export class WorldView {
       cam.bottom = -b
       cam.near = 10
       cam.far = 200
-      this.sun.shadow.bias = -0.0004
-      this.sun.shadow.normalBias = 0.04
+      this.sun.shadow.bias = -0.0006
+      this.sun.shadow.normalBias = 0.12
     }
     this.group.add(this.sun)
     this.group.add(this.sun.target)
 
     this.instance = t.build(this.group, geo)
+    mergeStatic(this.group)
     scene.add(this.group)
   }
 
