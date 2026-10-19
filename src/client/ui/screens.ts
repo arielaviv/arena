@@ -234,3 +234,42 @@ export class PauseScreen {
     show(this.root, v)
   }
 }
+
+// "MATCH FOUND" flash shown while the match loads behind it.
+export class MatchFoundScreen {
+  readonly root: HTMLDivElement
+  private timer = 0
+  private hideAt = 0
+
+  constructor(parent: HTMLElement) {
+    this.root = el('div', 'match-found', parent, '<h1>MATCH FOUND</h1>')
+    show(this.root, false)
+  }
+
+  play(duration: number): void {
+    this.root.classList.remove('leave', 'enter')
+    void this.root.offsetWidth
+    this.root.classList.add('enter')
+    show(this.root, true)
+    this.timer = 0
+    this.hideAt = duration
+  }
+
+  // Returns true on the frame it starts fading out.
+  update(dt: number): boolean {
+    if (this.hideAt <= 0) return false
+    this.timer += dt
+    if (this.timer >= this.hideAt) {
+      this.hideAt = 0
+      this.root.classList.remove('enter')
+      this.root.classList.add('leave')
+      window.setTimeout(() => show(this.root, false), 280)
+      return true
+    }
+    return false
+  }
+
+  get visible(): boolean {
+    return this.hideAt > 0
+  }
+}

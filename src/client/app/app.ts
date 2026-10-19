@@ -10,13 +10,15 @@ import { renderThumbnails } from '../render/thumbs'
 import { type ThemeId, WorldView } from '../render/world'
 import { Session } from '../session'
 import { Hud } from '../ui/hud'
-import { ClassPickScreen, PauseScreen, ResultsScreen, TitleScreen } from '../ui/screens'
+import { ClassPickScreen, MatchFoundScreen, PauseScreen, ResultsScreen, TitleScreen } from '../ui/screens'
 import { buildArenaMatch, buildTrainingMatch } from './matchmaker'
 import { PerfMonitor } from './perf'
 import { difficultyFor, loadSettings, type Settings, saveSettings } from './settings'
 import { TrainingControls } from './training'
 
 type State = 'title' | 'pick' | 'match' | 'results'
+
+const MATCH_FOUND_SECONDS = 1.15
 
 export class App {
   readonly renderer: Renderer
@@ -27,6 +29,7 @@ export class App {
   private readonly pick: ClassPickScreen
   private readonly results: ResultsScreen
   private readonly pause: PauseScreen
+  private readonly matchFound: MatchFoundScreen
   private readonly training: TrainingControls
   private state: State = 'title'
   session: Session | null = null
@@ -56,6 +59,7 @@ export class App {
     this.results.setVisible(false)
     this.pause = new PauseScreen(ui)
     this.pause.setVisible(false)
+    this.matchFound = new MatchFoundScreen(ui)
     this.training = new TrainingControls(this.hud.trainingPanel, this)
     this.applyKeyLabels()
     this.pause.renderKeybinds(this.settings.keybinds, null)
@@ -228,6 +232,8 @@ export class App {
 
   startArena(id: ClassId): void {
     const cfg = buildArenaMatch(id, difficultyFor(this.settings))
+    // The countdown starts under the MATCH FOUND card, so it adds no wait.
+    cfg.countdown = 3 + MATCH_FOUND_SECONDS
     this.beginSession(
       new Session(this.renderer, this.input, this.hud, this.audio, {
         config: cfg,
@@ -236,6 +242,8 @@ export class App {
         ...this.lag,
       }),
     )
+    this.matchFound.play(MATCH_FOUND_SECONDS)
+    this.audio.play('match-found')
   }
 
   startTraining(id: ClassId): void {
@@ -276,6 +284,7 @@ export class App {
 
   frame(dt: number): void {
     this.perf.frame(dt)
+    this.matchFound.update(dt)
     const s = this.session
     if (s) {
       s.update(dt)

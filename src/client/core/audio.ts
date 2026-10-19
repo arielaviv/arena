@@ -27,6 +27,7 @@ const SOUNDS: Record<string, Param[]> = {
   'cast-start': [0.18, 0, 330, 0.08, 0.1, 0.15, 0, 1, 2],
   'cast-done': [0.35, 0, 700, 0.01, 0.05, 0.15, 0, 1, u, u, 350, 0.05],
   error: [0.2, 0, 150, u, 0.03, 0.05, 2],
+  'match-found': [0.7, 0, 523, 0.01, 0.16, 0.45, 0, 1, u, u, 261, 0.08, u, u, u, u, 0.12],
 }
 
 const cache = new Map<string, number[]>()
