@@ -88,6 +88,7 @@ export interface Fighter {
   input: InputCmd
   lastSeq: number
   focusAlly: number
+  target: number // sticky enemy target: last enemy under the crosshair
   confuseYaw: number
   combatTimer: number
   stats: FighterStats
@@ -155,6 +156,7 @@ export function makeFighter(
     input: { ...emptyInput(), yaw },
     lastSeq: 0,
     focusAlly: id,
+    target: -1,
     confuseYaw: 0,
     combatTimer: 0,
     stats: { damage: 0, healing: 0, interrupts: 0, cc: 0 },

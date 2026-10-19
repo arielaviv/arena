@@ -25,6 +25,13 @@ export function updateAbilities(host: CombatHost, f: Fighter, aim: Aim, dt: numb
     f.focusAlly = (ally ?? dummyAlly ?? f).id
   }
 
+  if (aim.fighter >= 0) {
+    const under = host.byId(aim.fighter)
+    if (under && under.team !== f.team) f.target = under.id
+  }
+  const sticky = host.byId(f.target)
+  if (sticky && !sticky.alive) f.target = -1
+
   if (f.cast) advanceCast(host, f, aim, dt)
 
   for (const slot of USE_ORDER) {
@@ -65,6 +72,10 @@ export function tryUse(host: CombatHost, f: Fighter, slot: Slot, aim: Aim, loud:
     const ally = a.target.side === 'ally'
     const angle = ally ? COMBAT.allyAssistAngle : COMBAT.aimAssistAngle
     let t = coneTarget(f, aim, host.world, host.fighters, a.target.range, angle, ally, false)
+    if (!t && !ally) {
+      const sticky = host.byId(f.target)
+      if (sticky?.alive && inRangeAndSight(host, f, sticky, a.target.range)) t = sticky
+    }
     if (!t && ally) {
       const focus = host.byId(f.focusAlly)
       t = focus?.alive && inRangeAndSight(host, f, focus, a.target.range) ? focus : f
