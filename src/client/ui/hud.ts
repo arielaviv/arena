@@ -82,6 +82,8 @@ export class Hud {
   private readonly log: HTMLDivElement
   readonly trainingPanel: HTMLDivElement
   private classKey = ''
+  // L toggles the combat log during arena matches.
+  logInArena = false
   private lastView: HudView | null = null
 
   constructor(parent: HTMLElement) {
@@ -202,7 +204,7 @@ export class Hud {
     this.arena.forEach((a, i) => {
       show(a.root, i < enemies.length)
     })
-    show(this.log, view.mode === 'training')
+    show(this.log, view.mode === 'training' || this.logInArena)
     show(this.trainingPanel, view.mode === 'training')
   }
 
@@ -432,7 +434,7 @@ export class Hud {
 
   onEvent(e: SimEvent, myId: number): void {
     const v = this.lastView
-    const training = v?.mode === 'training'
+    const training = v?.mode === 'training' || this.logInArena
     switch (e.t) {
       case 'damage': {
         if (e.src === myId && e.dst !== myId) {

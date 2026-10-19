@@ -190,6 +190,7 @@ export class App {
       if (code === 'Escape') this.goTitle()
     } else if (this.state === 'results' && code === 'Space') this.nextMatch()
     else if (this.state === 'results' && code === 'Escape') this.goTitle()
+    else if (this.state === 'match' && code === 'KeyL') this.hud.logInArena = !this.hud.logInArena
     else if (this.state === 'match' && this.session?.mode === 'training') this.training.onKey(code)
   }
 
