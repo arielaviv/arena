@@ -1,6 +1,7 @@
 import { CLASSES, PLAYABLE } from '../../shared/combat/registry'
 import type { ClassId } from '../../shared/combat/types'
 import type { FighterSnap } from '../../shared/net/protocol'
+import { ACTION_LABEL, type Action, type Keybinds, keyLabel } from '../core/keybinds'
 import { el, show } from './dom'
 import { abilityIcon, iconSvg } from './icons'
 
@@ -196,12 +197,37 @@ export class PauseScreen {
       const o = el('option', '', this.quality, q[0]?.toUpperCase() + q.slice(1))
       o.value = q
     }
+    const kb = el('div', 'hud-panel mt-3 w-[320px] p-4 text-sm text-zinc-300', this.root)
+    const head = el('div', 'mb-2 flex items-center justify-between', kb)
+    el('span', 'font-semibold text-zinc-100', head, 'Keybinds')
+    this.resetKeys = el('button', 'text-xs text-zinc-400 hover:text-white', head, 'Reset')
+    this.keyList = el('div', 'grid grid-cols-2 gap-x-3 gap-y-1', kb)
     this.leave = el(
       'button',
       'mt-5 text-sm font-semibold text-zinc-400 hover:text-white',
       this.root,
       'Leave match',
     )
+  }
+
+  readonly resetKeys: HTMLButtonElement
+  private readonly keyList: HTMLDivElement
+  onRebind: ((action: Action) => void) | null = null
+
+  renderKeybinds(binds: Keybinds, waiting: Action | null): void {
+    this.keyList.innerHTML = ''
+    for (const action of Object.keys(ACTION_LABEL) as Action[]) {
+      const row = el('div', 'flex items-center justify-between gap-2', this.keyList)
+      el('span', 'truncate text-xs', row, ACTION_LABEL[action])
+      const active = waiting === action
+      const btn = el(
+        'button',
+        `min-w-[56px] rounded border px-2 py-[2px] text-xs font-semibold ${active ? 'border-amber-300 text-amber-200' : 'border-zinc-700 bg-zinc-800 text-zinc-100 hover:border-zinc-500'}`,
+        row,
+        active ? 'Press…' : keyLabel(binds[action]),
+      )
+      btn.addEventListener('click', () => this.onRebind?.(action))
+    }
   }
 
   setVisible(v: boolean): void {

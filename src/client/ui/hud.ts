@@ -16,7 +16,6 @@ export interface HudView {
   hasLos: (a: FighterSnap, b: FighterSnap) => boolean
 }
 
-const KEYS: Record<Slot, string> = { lmb: 'LMB', rmb: 'RMB', q: 'Q', e: 'E', f: 'F', r: 'R', c: 'C' }
 const FAIL_TEXT: Record<string, string> = {
   los: 'Target not in line of sight',
   range: 'Out of range',
@@ -46,6 +45,7 @@ interface SlotView {
   sweep: HTMLDivElement
   cd: HTMLDivElement
   name: HTMLDivElement
+  key: HTMLDivElement
   abilityId: string
   wasOnCd: boolean
 }
@@ -140,9 +140,9 @@ export class Hud {
       const root = el('div', 'slot', wrap)
       const sweep = el('div', 'sweep', root)
       const cd = el('div', 'cdtext', root)
-      el('div', 'key', root, KEYS[s])
+      const key = el('div', 'key', root, s.toUpperCase())
       const name = el('div', 'w-[64px] truncate text-center text-[10px] font-semibold text-zinc-400', wrap)
-      this.slots.set(s, { root, sweep, cd, name, abilityId: '', wasOnCd: false })
+      this.slots.set(s, { root, sweep, cd, name, key, abilityId: '', wasOnCd: false })
     }
     this.ult = el(
       'div',
@@ -164,6 +164,10 @@ export class Hud {
 
   setVisible(v: boolean): void {
     show(this.root, v)
+  }
+
+  setKeyLabels(labels: Record<Slot, string>): void {
+    for (const [slot, v] of this.slots) v.key.textContent = labels[slot]
   }
 
   private ensureLayout(view: HudView): void {

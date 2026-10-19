@@ -1,16 +1,27 @@
 import type { ClassId } from '../../shared/combat/types'
+import { DEFAULT_KEYBINDS, type Keybinds, sanitizeKeybinds } from '../core/keybinds'
 import type { Quality } from '../core/renderer'
 
 export interface Settings {
   sensitivity: number
   quality: Quality
+  qualityChosen: boolean
   lastClass: ClassId | null
   streak: number // positive = wins in a row, negative = losses
   matches: number
+  keybinds: Keybinds
 }
 
 const KEY = 'arena.settings.v1'
-const DEFAULTS: Settings = { sensitivity: 0.0022, quality: 'high', lastClass: null, streak: 0, matches: 0 }
+const DEFAULTS: Settings = {
+  sensitivity: 0.0022,
+  quality: 'high',
+  qualityChosen: false,
+  lastClass: null,
+  streak: 0,
+  matches: 0,
+  keybinds: { ...DEFAULT_KEYBINDS },
+}
 
 export function loadSettings(): Settings {
   try {
@@ -18,7 +29,9 @@ export function loadSettings(): Settings {
     if (!raw) return { ...DEFAULTS }
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULTS }
-    return { ...DEFAULTS, ...(parsed as Partial<Settings>) }
+    const merged = { ...DEFAULTS, ...(parsed as Partial<Settings>) }
+    merged.keybinds = sanitizeKeybinds((parsed as { keybinds?: unknown }).keybinds)
+    return merged
   } catch {
     return { ...DEFAULTS }
   }

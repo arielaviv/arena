@@ -3,6 +3,7 @@ import type { ClassId } from '../../shared/combat/types'
 import { buildArena } from '../../shared/sim/layout'
 import { Audio } from '../core/audio'
 import { Input } from '../core/input'
+import { DEFAULT_KEYBINDS, keyLabel } from '../core/keybinds'
 import { type Quality, Renderer } from '../core/renderer'
 import { models } from '../render/models'
 import { renderThumbnails } from '../render/thumbs'
@@ -11,6 +12,7 @@ import { Session } from '../session'
 import { Hud } from '../ui/hud'
 import { ClassPickScreen, PauseScreen, ResultsScreen, TitleScreen } from '../ui/screens'
 import { buildArenaMatch, buildTrainingMatch } from './matchmaker'
+import { PerfMonitor } from './perf'
 import { difficultyFor, loadSettings, type Settings, saveSettings } from './settings'
 import { TrainingControls } from './training'
 
@@ -36,6 +38,7 @@ export class App {
   private endTimer = 0
   private resultShown = false
   private readonly lag: { lagMs: number; jitterMs: number }
+  private readonly perf: PerfMonitor
 
   constructor(canvas: HTMLCanvasElement, ui: HTMLElement) {
     this.settings = loadSettings()
@@ -43,6 +46,7 @@ export class App {
     this.renderer.setQuality(this.settings.quality)
     this.input = new Input(canvas)
     this.input.sensitivity = this.settings.sensitivity
+    this.input.setBinds(this.settings.keybinds)
     this.hud = new Hud(ui)
     this.hud.setVisible(false)
     this.title = new TitleScreen(ui)
@@ -53,9 +57,39 @@ export class App {
     this.pause = new PauseScreen(ui)
     this.pause.setVisible(false)
     this.training = new TrainingControls(this.hud.trainingPanel, this)
+    this.applyKeyLabels()
+    this.pause.renderKeybinds(this.settings.keybinds, null)
+    this.pause.onRebind = (action) => {
+      this.pause.renderKeybinds(this.settings.keybinds, action)
+      this.input.captureNext((code) => {
+        if (code !== 'Escape') {
+          this.settings.keybinds = { ...this.settings.keybinds, [action]: code }
+          this.input.setBinds(this.settings.keybinds)
+          saveSettings(this.settings)
+          this.applyKeyLabels()
+        }
+        this.pause.renderKeybinds(this.settings.keybinds, null)
+      })
+    }
+    this.pause.resetKeys.addEventListener('click', () => {
+      this.settings.keybinds = { ...DEFAULT_KEYBINDS }
+      this.input.setBinds(this.settings.keybinds)
+      saveSettings(this.settings)
+      this.applyKeyLabels()
+      this.pause.renderKeybinds(this.settings.keybinds, null)
+    })
 
     const params = new URLSearchParams(location.search)
     this.lag = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0) }
+    this.perf = new PerfMonitor(this.renderer, params.has('fps'))
+    // Auto-quality only steps down, and only when the player hasn't picked a preset.
+    this.perf.onDowngrade = (q) => {
+      this.pause.quality.value = q
+    }
+    if (params.has('quality')) {
+      const q = params.get('quality')
+      if (q === 'high' || q === 'medium' || q === 'low') this.renderer.setQuality(q)
+    }
 
     this.title.setClass(this.settings.lastClass)
     this.title.play.addEventListener('click', () => this.onPlay())
@@ -81,6 +115,7 @@ export class App {
       const q = this.pause.quality.value as Quality
       this.renderer.setQuality(q)
       this.settings.quality = q
+      this.settings.qualityChosen = true
       saveSettings(this.settings)
     })
     canvas.addEventListener('click', () => {
@@ -97,6 +132,19 @@ export class App {
     void models.loadAll().then(() => {
       const thumbs = renderThumbnails()
       for (const [id, url] of thumbs) this.pick.setThumb(id, url)
+    })
+  }
+
+  private applyKeyLabels(): void {
+    const b = this.settings.keybinds
+    this.hud.setKeyLabels({
+      lmb: keyLabel(b.lmb),
+      rmb: keyLabel(b.rmb),
+      q: keyLabel(b.q),
+      e: keyLabel(b.e),
+      f: keyLabel(b.f),
+      r: keyLabel(b.r),
+      c: keyLabel(b.c),
     })
   }
 
@@ -175,6 +223,7 @@ export class App {
     this.hud.setVisible(true)
     this.hud.setBanner('', '')
     this.input.lock()
+    if (!this.settings.qualityChosen) this.perf.arm()
   }
 
   startArena(id: ClassId): void {
@@ -226,6 +275,7 @@ export class App {
   }
 
   frame(dt: number): void {
+    this.perf.frame(dt)
     const s = this.session
     if (s) {
       s.update(dt)

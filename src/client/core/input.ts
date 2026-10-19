@@ -1,53 +1,50 @@
 import { CAMERA } from '../../shared/sim/constants'
-import { Btn } from '../../shared/sim/input'
+import { ACTION_BUTTON, type Action, DEFAULT_KEYBINDS, type Keybinds } from './keybinds'
 
-const KEY_BUTTONS: Record<string, number> = {
-  Space: Btn.Jump,
-  ShiftLeft: Btn.Slide,
-  ShiftRight: Btn.Slide,
-  KeyQ: Btn.Q,
-  KeyE: Btn.E,
-  KeyF: Btn.F,
-  KeyR: Btn.R,
-  KeyC: Btn.C,
-  F1: Btn.FocusSelf,
-  F2: Btn.FocusAlly,
-}
-
-// Keyboard + mouse with pointer lock. Owns the look angles.
+// Keyboard + mouse with pointer lock and rebindable actions. Owns the look angles.
 export class Input {
   yaw = 0
   pitch = 0
   sensitivity = 0.0022
-  private keys = new Set<string>()
-  private mouse = 0
+  private down = new Set<string>()
+  private binds: Keybinds = { ...DEFAULT_KEYBINDS }
+  private codeToBits = new Map<string, number>()
   private readonly canvas: HTMLCanvasElement
+  // While set, the next key or mouse button is captured for rebinding.
+  private capture: ((code: string) => void) | null = null
   onLockChange: ((locked: boolean) => void) | null = null
   onKey: ((code: string) => void) | null = null
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas
+    this.setBinds(this.binds)
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'F1' || e.code === 'F2' || e.code === 'Tab' || (e.code === 'Space' && this.locked)) {
+      if (this.capture) {
         e.preventDefault()
+        const cb = this.capture
+        this.capture = null
+        cb(e.code)
+        return
       }
+      if (this.codeToBits.has(e.code) || e.code === 'Tab' || (e.code === 'Space' && this.locked))
+        e.preventDefault()
       if (!e.repeat) this.onKey?.(e.code)
-      this.keys.add(e.code)
+      this.down.add(e.code)
     })
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code))
-    window.addEventListener('blur', () => {
-      this.keys.clear()
-      this.mouse = 0
-    })
+    window.addEventListener('keyup', (e) => this.down.delete(e.code))
+    window.addEventListener('blur', () => this.down.clear())
     window.addEventListener('mousedown', (e) => {
-      if (!this.locked) return
-      if (e.button === 0) this.mouse |= Btn.Lmb
-      if (e.button === 2) this.mouse |= Btn.Rmb
+      const code = `Mouse${e.button}`
+      if (this.capture) {
+        e.preventDefault()
+        const cb = this.capture
+        this.capture = null
+        cb(code)
+        return
+      }
+      if (this.locked) this.down.add(code)
     })
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.mouse &= ~Btn.Lmb
-      if (e.button === 2) this.mouse &= ~Btn.Rmb
-    })
+    window.addEventListener('mouseup', (e) => this.down.delete(`Mouse${e.button}`))
     window.addEventListener('contextmenu', (e) => e.preventDefault())
     document.addEventListener('mousemove', (e) => {
       if (!this.locked) return
@@ -56,12 +53,26 @@ export class Input {
       this.pitch = Math.max(CAMERA.pitchMin, Math.min(CAMERA.pitchMax, this.pitch))
     })
     document.addEventListener('pointerlockchange', () => {
-      if (!this.locked) {
-        this.keys.clear()
-        this.mouse = 0
-      }
+      if (!this.locked) this.down.clear()
       this.onLockChange?.(this.locked)
     })
+  }
+
+  setBinds(binds: Keybinds): void {
+    this.binds = { ...binds }
+    this.codeToBits.clear()
+    for (const [action, code] of Object.entries(this.binds) as Array<[Action, string]>) {
+      const bit = ACTION_BUTTON[action]
+      if (bit !== undefined) this.codeToBits.set(code, (this.codeToBits.get(code) ?? 0) | bit)
+    }
+  }
+
+  get keybinds(): Keybinds {
+    return this.binds
+  }
+
+  captureNext(cb: (code: string) => void): void {
+    this.capture = cb
   }
 
   get locked(): boolean {
@@ -78,21 +89,21 @@ export class Input {
     if (this.locked) document.exitPointerLock()
   }
 
-  isDown(code: string): boolean {
-    return this.keys.has(code)
+  private isDown(action: Action): boolean {
+    return this.down.has(this.binds[action])
   }
 
   moveX(): number {
-    return (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0)
+    return (this.isDown('right') ? 1 : 0) - (this.isDown('left') ? 1 : 0)
   }
 
   moveZ(): number {
-    return (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0)
+    return (this.isDown('forward') ? 1 : 0) - (this.isDown('back') ? 1 : 0)
   }
 
   buttons(): number {
-    let b = this.mouse
-    for (const code of this.keys) b |= KEY_BUTTONS[code] ?? 0
+    let b = 0
+    for (const code of this.down) b |= this.codeToBits.get(code) ?? 0
     return b
   }
 }
