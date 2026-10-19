@@ -1,0 +1,1 @@
+Creature models (public/models/*.glb): "Ultimate Monsters" by Quaternius (https://quaternius.com/packs/ultimatemonsters.html), CC0 1.0 Universal (public domain). Converted to meshopt-compressed GLB.

@@ -9,3 +9,5 @@ dist
 
 .vercel
 .env*
+public/dev-models
+dev
