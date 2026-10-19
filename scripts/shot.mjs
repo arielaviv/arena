@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { chromium } from 'playwright-core'
 
 const out = process.argv[2] ?? 'shots'
-const url = process.env.ARENA_URL ?? 'http://127.0.0.1:5180/'
+const url = process.env.ARENA_URL ?? 'http://127.0.0.1:5180/?shots'
 mkdirSync(out, { recursive: true })
 
 const candidates = [

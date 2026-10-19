@@ -40,6 +40,8 @@ export class App {
   private pickMode: 'arena' | 'training' = 'arena'
   private endTimer = 0
   private unlockedFor = 0
+  // Screenshot runs (?shots) never get pointer lock; skip the resume prompt there.
+  private readonly shots: boolean
   private resultShown = false
   private readonly lag: { lagMs: number; jitterMs: number }
   private readonly perf: PerfMonitor
@@ -86,6 +88,7 @@ export class App {
 
     const params = new URLSearchParams(location.search)
     this.lag = { lagMs: Number(params.get('lag') ?? 0), jitterMs: Number(params.get('jitter') ?? 0) }
+    this.shots = params.has('shots')
     this.perf = new PerfMonitor(this.renderer, params.has('fps'))
     // Auto-quality only steps down, and only when the player hasn't picked a preset.
     this.perf.onDowngrade = (q) => {
@@ -289,7 +292,7 @@ export class App {
     this.matchFound.update(dt, this.session?.ready ?? true)
     // Browsers refuse pointer lock without a click (e.g. auto next match):
     // surface the RESUME button instead of leaving the player stuck.
-    if (this.state === 'match' && !this.input.locked && !this.matchFound.visible) {
+    if (this.state === 'match' && !this.input.locked && !this.matchFound.visible && !this.shots) {
       this.unlockedFor += dt
       if (this.unlockedFor > 0.6) this.pause.setVisible(true)
     } else {
