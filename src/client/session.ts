@@ -347,6 +347,8 @@ export class Session {
         auras: auraIds,
         dashing: (local && pf ? pf.move : f.move) === 'dash',
         dashColor: dashAbility ? elementGlow(dashAbility.element) : '#ffffff',
+        cast: f.cast?.ability ?? null,
+        castFrac: f.cast ? f.cast.elapsed / Math.max(0.01, f.cast.duration) : 0,
       })
     }
 

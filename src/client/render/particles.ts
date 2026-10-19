@@ -43,7 +43,7 @@ export class Particles {
           float d = length(gl_PointCoord - 0.5);
           float a = smoothstep(0.5, 0.0, d);
           float core = smoothstep(0.18, 0.0, d);
-          gl_FragColor = vec4(vColor * (1.0 + core * 1.5), a * vAlpha);
+          gl_FragColor = vec4(vColor * (1.0 + core * 0.5), a * vAlpha);
         }
       `,
     })

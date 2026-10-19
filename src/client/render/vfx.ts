@@ -2,25 +2,26 @@ import {
   AdditiveBlending,
   CircleGeometry,
   Color,
-  CylinderGeometry,
   DoubleSide,
   Group,
   Mesh,
   MeshBasicMaterial,
-  RingGeometry,
   type Scene,
   ShaderMaterial,
   SphereGeometry,
+  TorusGeometry,
   Vector3,
 } from 'three'
 import type { SimEvent } from '../../shared/combat/events'
 import { getAbility } from '../../shared/combat/registry'
-import type { Element } from '../../shared/combat/types'
+import type { AbilityDef, Element } from '../../shared/combat/types'
 import type { Snapshot } from '../../shared/net/protocol'
+import { fxTime, orbMaterial } from './fx/materials'
+import { FxSystem, type Palette } from './fx/system'
 import { Particles } from './particles'
 import { NOISE_GLSL } from './shaderlib'
 
-export const ELEMENT: Record<Element, { core: string; glow: string; spark: string }> = {
+export const ELEMENT: Record<Element, Palette> = {
   fire: { core: '#fff1c2', glow: '#ff7a1a', spark: '#ffb347' },
   water: { core: '#e6fbff', glow: '#2fb8ff', spark: '#9ae6ff' },
   poison: { core: '#f2ffd0', glow: '#8be02b', spark: '#b26bff' },
@@ -29,9 +30,30 @@ export const ELEMENT: Record<Element, { core: string; glow: string; spark: strin
   normal: { core: '#ffffff', glow: '#d4d4d8', spark: '#fafafa' },
 }
 
-export function abilityColors(abilityId: string): { core: string; glow: string; spark: string } {
+// A few moves get their own palette.
+const OVERRIDE: Record<string, Palette> = {
+  'night-slash': { core: '#f5e1ff', glow: '#7c3aed', spark: '#2e1065' },
+  toxic: { core: '#f5e1ff', glow: '#a855f7', spark: '#84cc16' },
+  'sleep-powder': { core: '#f0fff4', glow: '#86efac', spark: '#bbf7d0' },
+  'floral-healing': { core: '#fff1f8', glow: '#f472b6', spark: '#fbcfe8' },
+  aromatherapy: { core: '#fff1f8', glow: '#f9a8d4', spark: '#fde68a' },
+  'jungle-healing': { core: '#f7fee7', glow: '#22c55e', spark: '#fde047' },
+  'life-dew': { core: '#ecfeff', glow: '#67e8f9', spark: '#a5f3fc' },
+  'pollen-puff': { core: '#fffbeb', glow: '#facc15', spark: '#fde68a' },
+  hypnosis: { core: '#faf5ff', glow: '#a855f7', spark: '#e9d5ff' },
+  'future-sight': { core: '#fdf4ff', glow: '#c026d3', spark: '#f0abfc' },
+  'lum-berry': { core: '#fff7ed', glow: '#fb923c', spark: '#fde047' },
+}
+
+export function palette(abilityId: string): Palette {
+  const o = OVERRIDE[abilityId]
+  if (o) return o
   const a = getAbility(abilityId)
   return ELEMENT[a?.element ?? 'normal']
+}
+
+export function abilityColors(abilityId: string): Palette {
+  return palette(abilityId)
 }
 
 interface ProjectileView {
@@ -45,15 +67,9 @@ interface ProjectileView {
   gravity: number
   t0: number
   seen: boolean
-  color: { core: string; glow: string; spark: string }
-}
-
-interface Transient {
-  mesh: Mesh
-  ttl: number
-  total: number
-  grow: number
-  fade: boolean
+  p: Palette
+  ability: string
+  spin: Mesh | null
 }
 
 export interface FighterView {
@@ -67,17 +83,8 @@ export interface FighterView {
   auras: readonly string[]
   dashing: boolean
   dashColor: string
-}
-
-function glowMat(color: string, opacity = 1, mult = 2.2): MeshBasicMaterial {
-  const c = new Color(color).multiplyScalar(mult)
-  return new MeshBasicMaterial({
-    color: c,
-    transparent: true,
-    opacity,
-    blending: AdditiveBlending,
-    depthWrite: false,
-  })
+  cast?: string | null
+  castFrac?: number
 }
 
 function hazardMaterial(color: string): ShaderMaterial {
@@ -87,7 +94,7 @@ function hazardMaterial(color: string): ShaderMaterial {
     blending: AdditiveBlending,
     side: DoubleSide,
     uniforms: {
-      uTime: { value: 0 },
+      uTime: fxTime,
       uColor: { value: new Color(color) },
       uLife: { value: 1 },
       uFill: { value: 0 },
@@ -106,9 +113,10 @@ function hazardMaterial(color: string): ShaderMaterial {
         float a = atan(p.y, p.x);
         float swirl = fbm(vec2(a * 2.0 + uTime * 1.5 - r * 3.0, r * 4.0 - uTime));
         float rim = smoothstep(0.86, 0.97, r) * smoothstep(1.0, 0.97, r);
-        float body = smoothstep(1.0, 0.2, r) * (0.18 + swirl * 0.5);
-        float fill = step(r, uFill) * 0.25;
-        float alpha = (rim * 1.4 + body + fill) * uLife;
+        float body = smoothstep(1.0, 0.2, r) * (0.14 + swirl * 0.45);
+        float fill = smoothstep(uFill, uFill - 0.04, r) * step(0.001, uFill) * 0.35;
+        float dash = step(0.5, fract(a * 6.0 / 6.28318 - uTime * 0.5)) * rim;
+        float alpha = (rim * 0.9 + dash * 0.6 + body + fill) * uLife;
         gl_FragColor = vec4(uColor * (1.3 + swirl), alpha);
       }
     `,
@@ -118,60 +126,61 @@ function hazardMaterial(color: string): ShaderMaterial {
 const tmp = new Vector3()
 const up = new Vector3(0, 1, 0)
 
+interface Persistent {
+  mesh: Mesh
+  mat: ShaderMaterial
+  seen: boolean
+}
+
 export class Vfx {
   readonly group = new Group()
   readonly particles = new Particles()
+  readonly fx: FxSystem
   private projectiles = new Map<number, ProjectileView>()
   private hazards = new Map<number, { mesh: Mesh; mat: ShaderMaterial; rem: number; total: number }>()
-  private delayed = new Map<number, { mesh: Mesh; mat: ShaderMaterial; rem: number; total: number }>()
-  private beams = new Map<number, { mesh: Mesh; ttl: number }>()
-  private transients: Transient[] = []
-  private readonly sphereGeo = new SphereGeometry(1, 12, 10)
-  private readonly beamGeo = new CylinderGeometry(1, 1, 1, 10, 1, true)
+  private delayed = new Map<
+    number,
+    { mesh: Mesh; mat: ShaderMaterial; rem: number; total: number; ability: string; target: number }
+  >()
+  private beams = new Map<number, { mesh: Mesh; mat: ShaderMaterial; ttl: number }>()
+  private runes = new Map<number, Persistent>()
+  private auraFx = new Map<string, Persistent>()
+  private readonly sphereGeo = new SphereGeometry(1, 16, 12)
   private time = 0
+  private fighters: readonly FighterView[] = []
 
   constructor(scene: Scene) {
-    this.group.add(this.particles.points)
+    this.fx = new FxSystem(this.particles)
+    this.group.add(this.particles.points, this.fx.group)
     scene.add(this.group)
   }
 
-  // Projectiles, hazards and telegraphs from the latest snapshot.
+  private fighter(id: number): FighterView | undefined {
+    return this.fighters.find((f) => f.id === id)
+  }
+
+  private chest(id: number): Vector3 | undefined {
+    const f = this.fighter(id)
+    return f ? tmp.set(f.x, f.y + f.height * 0.62, f.z) : undefined
+  }
+
+  // ---- snapshot-driven objects ------------------------------------------
+
   sync(snap: Snapshot, serverTime: number): void {
     for (const v of this.projectiles.values()) v.seen = false
-    for (const p of snap.projectiles) {
-      let v = this.projectiles.get(p.id)
-      const ability = getAbility(p.ability)
+    for (const pr of snap.projectiles) {
+      let v = this.projectiles.get(pr.id)
+      const ability = getAbility(pr.ability)
       if (!v) {
-        const color = abilityColors(p.ability)
-        const mesh = new Group()
-        const radius = ability?.target.kind === 'projectile' ? ability.target.radius : 0.25
-        const core = new Mesh(this.sphereGeo, glowMat(color.core, 1, 2.6))
-        core.scale.setScalar(radius * 0.7)
-        const halo = new Mesh(this.sphereGeo, glowMat(color.glow, 0.45, 1.8))
-        halo.scale.setScalar(radius * 1.6)
-        mesh.add(core, halo)
-        this.group.add(mesh)
-        v = {
-          mesh,
-          x: p.x,
-          y: p.y,
-          z: p.z,
-          vx: p.vx,
-          vy: p.vy,
-          vz: p.vz,
-          gravity: 0,
-          t0: serverTime,
-          seen: true,
-          color,
-        }
-        this.projectiles.set(p.id, v)
+        v = this.makeProjectile(pr.ability, ability, pr.x, pr.y, pr.z, serverTime)
+        this.projectiles.set(pr.id, v)
       }
-      v.x = p.x
-      v.y = p.y
-      v.z = p.z
-      v.vx = p.vx
-      v.vy = p.vy
-      v.vz = p.vz
+      v.x = pr.x
+      v.y = pr.y
+      v.z = pr.z
+      v.vx = pr.vx
+      v.vy = pr.vy
+      v.vz = pr.vz
       v.gravity = ability?.target.kind === 'projectile' ? (ability.target.gravity ?? 0) : 0
       v.t0 = serverTime
       v.seen = true
@@ -179,6 +188,7 @@ export class Vfx {
     for (const [id, v] of this.projectiles) {
       if (!v.seen) {
         this.group.remove(v.mesh)
+        v.mesh.traverse((o) => ((o as Mesh).material as ShaderMaterial | undefined)?.dispose?.())
         this.projectiles.delete(id)
       }
     }
@@ -188,8 +198,8 @@ export class Vfx {
       liveHazards.add(h.id)
       let v = this.hazards.get(h.id)
       if (!v) {
-        const color = abilityColors(h.ability)
-        const mat = hazardMaterial(color.glow)
+        const p = palette(h.ability)
+        const mat = hazardMaterial(p.glow)
         const mesh = new Mesh(new CircleGeometry(h.radius, 48), mat)
         mesh.rotation.x = -Math.PI / 2
         mesh.position.set(h.x, h.y + 0.06, h.z)
@@ -213,13 +223,14 @@ export class Vfx {
       liveDelayed.add(d.id)
       let v = this.delayed.get(d.id)
       if (!v) {
-        const color = abilityColors(d.ability)
-        const mat = hazardMaterial(color.glow)
+        const p = palette(d.ability)
+        const mat = hazardMaterial(p.glow)
         const mesh = new Mesh(new CircleGeometry(d.radius, 48), mat)
         mesh.rotation.x = -Math.PI / 2
         this.group.add(mesh)
-        v = { mesh, mat, rem: d.rem, total: Math.max(d.rem, 0.1) }
+        v = { mesh, mat, rem: d.rem, total: Math.max(d.rem, 0.1), ability: d.ability, target: d.target }
         this.delayed.set(d.id, v)
+        if (d.ability === 'eruption') this.fx.meteor(d.x, d.y, d.z, d.rem, p)
       }
       v.rem = d.rem
       v.mesh.position.set(d.x, d.y + 0.08, d.z)
@@ -234,31 +245,41 @@ export class Vfx {
     }
   }
 
-  private transient(mesh: Mesh, ttl: number, grow: number, fade = true): void {
-    this.group.add(mesh)
-    this.transients.push({ mesh, ttl, total: ttl, grow, fade })
-  }
-
-  private ring(
+  private makeProjectile(
+    id: string,
+    a: AbilityDef | undefined,
     x: number,
     y: number,
     z: number,
-    radius: number,
-    color: string,
-    ttl: number,
-    grow: number,
-  ): void {
-    const m = new Mesh(new RingGeometry(radius * 0.82, radius, 48), glowMat(color, 0.9))
-    m.rotation.x = -Math.PI / 2
-    m.position.set(x, y, z)
-    this.transient(m, ttl, grow)
-  }
-
-  private flash(x: number, y: number, z: number, color: string, size: number, ttl: number): void {
-    const m = new Mesh(this.sphereGeo, glowMat(color, 0.9, 2.4))
-    m.position.set(x, y, z)
-    m.scale.setScalar(size)
-    this.transient(m, ttl, 2.5)
+    t0: number,
+  ): ProjectileView {
+    const p = palette(id)
+    const mesh = new Group()
+    const radius = a?.target.kind === 'projectile' ? a.target.radius : 0.25
+    const core = new Mesh(this.sphereGeo, orbMaterial(p.core, p.glow))
+    core.scale.setScalar(radius * 1.1)
+    mesh.add(core)
+    const halo = new Mesh(
+      this.sphereGeo,
+      new MeshBasicMaterial({
+        color: new Color(p.glow).multiplyScalar(1.6),
+        transparent: true,
+        opacity: 0.25,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    halo.scale.setScalar(radius * 2.2)
+    mesh.add(halo)
+    let spin: Mesh | null = null
+    if (id === 'confuse-ray' || id === 'dummy-confuse' || id === 'fire-spin' || id === 'thunder-wave') {
+      spin = new Mesh(new TorusGeometry(radius * 1.8, radius * 0.18, 6, 24), orbMaterial(p.core, p.spark))
+      mesh.add(spin)
+    }
+    if (id === 'water-gun') core.scale.set(radius * 0.9, radius * 0.9, radius * 1.8)
+    mesh.position.set(x, y, z)
+    this.group.add(mesh)
+    return { mesh, x, y, z, vx: 0, vy: 0, vz: 0, gravity: 0, t0, seen: true, p, ability: id, spin }
   }
 
   private beam(
@@ -269,15 +290,14 @@ export class Vfx {
     tx: number,
     ty: number,
     tz: number,
-    color: string,
+    p: Palette,
     width: number,
     ttl: number,
   ): void {
     let b = this.beams.get(srcId)
     if (!b) {
-      const mesh = new Mesh(this.beamGeo, glowMat(color, 0.85, 2.4))
-      this.group.add(mesh)
-      b = { mesh, ttl }
+      const made = this.fx.beamMesh(p)
+      b = { mesh: made.mesh, mat: made.mat, ttl }
       this.beams.set(srcId, b)
     }
     b.ttl = ttl
@@ -288,127 +308,300 @@ export class Vfx {
     b.mesh.scale.set(width, len, width)
   }
 
+  // ---- event recipes -----------------------------------------------------
+
   onEvent(e: SimEvent, fighterPos: (id: number) => FighterView | undefined): void {
+    const P = this.particles
+    const fx = this.fx
     switch (e.t) {
       case 'use': {
         const a = getAbility(e.ability)
         if (!a) return
-        const c = ELEMENT[a.element]
+        const p = palette(a.id)
         const t = a.target
-        if (t.kind === 'beam') {
-          this.beam(e.src, e.x, e.y, e.z, e.tx, e.ty, e.tz, c.glow, t.radius * 0.7, 0.2)
-          for (let i = 0; i < 3; i++) {
-            const k = Math.random()
-            this.particles.emit(
-              e.x + (e.tx - e.x) * k,
-              e.y + (e.ty - e.y) * k,
-              e.z + (e.tz - e.z) * k,
-              0,
-              0.6,
-              0,
-              c.spark,
-              0.25,
-              0.4,
-            )
+        const src = fighterPos(e.src)
+        switch (t.kind) {
+          case 'beam':
+            this.beam(e.src, e.x, e.y, e.z, e.tx, e.ty, e.tz, p, a.id === 'hydro-pump' ? 0.7 : 0.34, 0.22)
+            if (e.target >= 0) P.burst(e.tx, e.ty, e.tz, p.spark, 3, 3, 0.3, 0.25)
+            break
+          case 'hitscan':
+            fx.beamOnce(e.x, e.y, e.z, e.tx, e.ty, e.tz, a.id === 'vine-whip' ? 0.12 : 0.2, p, 0.2)
+            fx.flash(e.tx, e.ty, e.tz, 0.5, p, 0.22)
+            P.burst(e.tx, e.ty, e.tz, p.spark, 16, 6, 0.35, 0.4)
+            if (a.id === 'extrasensory') fx.shockwave(e.tx, e.ty, e.tz, 1.6, p.glow, 0.35, true)
+            break
+          case 'melee':
+          case 'cone': {
+            if (!src) return
+            const big = a.slot === 'rmb'
+            if (t.kind === 'melee') {
+              const tilt = (Math.random() - 0.5) * 0.9
+              fx.slash(
+                src.x,
+                src.y + 1.05,
+                src.z,
+                src.yaw,
+                t.range * (big ? 1.15 : 0.95),
+                t.angle,
+                p.glow,
+                tilt,
+                big ? 0.3 : 0.18,
+              )
+              if (big)
+                fx.slash(
+                  src.x,
+                  src.y + 1.1,
+                  src.z,
+                  src.yaw,
+                  t.range * 1.25,
+                  t.angle * 0.9,
+                  p.spark,
+                  -tilt,
+                  0.35,
+                )
+            } else if (a.id === 'surf') {
+              fx.wave(src.x, src.y, src.z, src.yaw, t.range, 7, p.glow, 0.45)
+            } else {
+              // Glare: an eye flash then a stunning cone
+              fx.flash(
+                src.x + Math.cos(src.yaw) * 0.6,
+                src.y + 1.5,
+                src.z + Math.sin(src.yaw) * 0.6,
+                0.5,
+                { core: '#fffbeb', glow: '#facc15', spark: '#fde047' },
+                0.3,
+              )
+              for (let i = 0; i < 50; i++) {
+                const ang = src.yaw + (Math.random() - 0.5) * t.angle
+                const sp = t.range * (1.2 + Math.random())
+                P.emit(
+                  src.x,
+                  src.y + 1.2,
+                  src.z,
+                  Math.cos(ang) * sp,
+                  (Math.random() - 0.3) * 2,
+                  Math.sin(ang) * sp,
+                  '#fde047',
+                  0.4,
+                  0.4,
+                  2.5,
+                )
+              }
+            }
+            break
           }
-        } else if (t.kind === 'hitscan') {
-          this.beam(-e.src - 1, e.x, e.y, e.z, e.tx, e.ty, e.tz, c.spark, 0.06, 0.12)
-          this.flash(e.tx, e.ty, e.tz, c.glow, 0.5, 0.25)
-        } else if (t.kind === 'melee' || t.kind === 'cone') {
-          const f = fighterPos(e.src)
-          if (!f) return
-          const range = t.range
-          const geo = new RingGeometry(range * 0.35, range, 24, 1, -t.angle / 2, t.angle)
-          const m = new Mesh(geo, glowMat(c.glow, 0.7))
-          m.rotation.x = -Math.PI / 2
-          m.rotation.z = -f.yaw
-          m.position.set(f.x, f.y + (t.kind === 'melee' ? 1.0 : 0.15), f.z)
-          this.transient(m, t.kind === 'melee' ? 0.16 : 0.4, t.kind === 'cone' ? 0.4 : 0.1)
-          if (t.kind === 'cone') {
-            for (let i = 0; i < 40; i++) {
-              const a2 = f.yaw + (Math.random() - 0.5) * t.angle
-              const sp = range * (1 + Math.random())
-              this.particles.emit(
-                f.x,
-                f.y + 0.4,
-                f.z,
-                Math.cos(a2) * sp,
-                Math.random() * 2,
-                Math.sin(a2) * sp,
-                c.spark,
+          case 'dash':
+            if (!src) return
+            fx.shockwave(src.x, src.y + 0.1, src.z, 1.6, p.glow, 0.35)
+            P.burst(src.x, src.y + 0.8, src.z, p.spark, 18, 5, 0.4, 0.4)
+            if (a.id === 'teleport') {
+              fx.flash(src.x, src.y + 1, src.z, 0.9, p, 0.3)
+              fx.flash(e.tx, e.ty + 1, e.tz, 0.9, p, 0.35)
+              fx.shockwave(e.tx, e.ty + 0.1, e.tz, 2, p.glow, 0.4)
+            }
+            break
+          case 'nova':
+            fx.shockwave(e.x, e.y + 0.1, e.z, 14, p.glow, 0.9)
+            fx.shockwave(e.x, e.y + 0.15, e.z, 8, p.spark, 0.7)
+            for (let i = 0; i < 90; i++) {
+              const ang = Math.random() * Math.PI * 2
+              const sp = 4 + Math.random() * 10
+              P.emit(
+                e.x,
+                e.y + 0.5,
+                e.z,
+                Math.cos(ang) * sp,
+                1 + Math.random() * 3,
+                Math.sin(ang) * sp,
+                i % 3 ? p.glow : p.spark,
                 0.5,
-                0.5,
-                2.5,
+                1.2,
+                1.2,
+                -0.5,
               )
             }
+            break
+          case 'self':
+            if (a.slot === 'c') {
+              fx.flash(e.x, e.y + 1, e.z, 0.8, p, 0.3)
+              fx.shockwave(e.x, e.y + 0.1, e.z, 2.4, '#ffffff', 0.4)
+              P.burst(e.x, e.y + 1, e.z, '#fde047', 30, 6, 0.4, 0.6)
+            } else {
+              fx.shockwave(e.x, e.y + 0.1, e.z, 1.8, p.glow, 0.4)
+              P.burst(e.x, e.y + 1, e.z, p.spark, 24, 4, 0.4, 0.6)
+            }
+            break
+          case 'targeted': {
+            const target = e.target
+            const size = a.slot === 'r' ? 0.45 : a.slot === 'rmb' ? 0.38 : 0.28
+            fx.travel(
+              e.x,
+              e.y,
+              e.z,
+              () => this.chest(target),
+              a.id === 'fire-blast' ? 0.16 : 0.24,
+              size,
+              p,
+              (at) => this.arrive(a, at.x, at.y, at.z),
+            )
+            break
           }
-        } else if (t.kind === 'nova') {
-          this.ring(e.x, e.y + 0.1, e.z, 2, c.glow, 0.7, 12)
-          this.particles.burst(e.x, e.y + 1, e.z, c.spark, 60, 8, 0.5, 0.9, -2)
-        } else if (t.kind === 'self' && a.slot === 'c') {
-          this.ring(e.x, e.y + 0.1, e.z, 1.2, '#ffffff', 0.5, 3)
-          this.particles.burst(e.x, e.y + 1, e.z, '#ffe066', 30, 6, 0.4, 0.6)
-        } else if (t.kind === 'self') {
-          this.ring(e.x, e.y + 0.1, e.z, 1.1, c.glow, 0.5, 1.5)
-        } else if (t.kind === 'projectile' || t.kind === 'targeted' || t.kind === 'ground') {
-          this.particles.burst(e.x, e.y, e.z, c.spark, 6, 2.5, 0.25, 0.25)
+          case 'projectile':
+            fx.flash(e.x, e.y, e.z, 0.25, p, 0.12)
+            P.burst(e.x, e.y, e.z, p.spark, 5, 2.5, 0.25, 0.2)
+            break
+          case 'ground':
+            break
         }
         break
       }
       case 'impact': {
-        const c = abilityColors(e.ability)
         const a = getAbility(e.ability)
+        const p = palette(e.ability)
         const big = a ? a.slot !== 'lmb' : false
-        this.flash(e.x, e.y, e.z, c.glow, big ? 0.6 : 0.35, big ? 0.3 : 0.18)
-        this.particles.burst(e.x, e.y, e.z, c.spark, big ? 28 : 12, big ? 7 : 4.5, big ? 0.45 : 0.3, 0.45, 4)
-        if (e.ny > 0.7) this.ring(e.x, e.y + 0.05, e.z, big ? 1 : 0.5, c.glow, 0.35, 3)
+        const el = a?.element ?? 'normal'
+        fx.flash(e.x, e.y, e.z, big ? 1.0 : 0.55, p, big ? 0.3 : 0.18)
+        if (el === 'water') {
+          for (let i = 0; i < (big ? 30 : 14); i++) {
+            P.emit(
+              e.x,
+              e.y,
+              e.z,
+              (Math.random() - 0.5) * 6,
+              2 + Math.random() * 4,
+              (Math.random() - 0.5) * 6,
+              i % 2 ? '#e0f7ff' : p.glow,
+              0.3,
+              0.6,
+              0.8,
+              14,
+            )
+          }
+        } else if (el === 'grass') {
+          P.burst(e.x, e.y, e.z, '#fde68a', big ? 30 : 14, 3, 0.45, 0.9, -0.5)
+        } else if (el === 'poison') {
+          for (let i = 0; i < (big ? 24 : 12); i++) {
+            P.emit(
+              e.x,
+              e.y,
+              e.z,
+              (Math.random() - 0.5) * 5,
+              Math.random() * 3,
+              (Math.random() - 0.5) * 5,
+              i % 2 ? '#a3e635' : '#7c3aed',
+              0.4,
+              0.6,
+              1.5,
+              9,
+            )
+          }
+        } else {
+          P.burst(e.x, e.y, e.z, p.spark, big ? 30 : 12, big ? 7 : 4.5, big ? 0.45 : 0.3, 0.45, 4)
+        }
+        if (e.ny > 0.7) {
+          fx.shockwave(e.x, e.y + 0.05, e.z, big ? 3.2 : 1.5, p.glow, 0.4)
+          if (el === 'fire') fx.decal(e.x, e.y, e.z, big ? 1.6 : 0.6, '#1a0c06', true, 3)
+        } else if (big) {
+          fx.shockwave(e.x, e.y, e.z, 2.4, p.glow, 0.35, true)
+        }
         break
       }
       case 'detonate': {
-        const c = abilityColors(e.ability)
-        this.flash(e.x, e.y + 1, e.z, c.core, e.radius * 0.45, 0.45)
-        this.ring(e.x, e.y + 0.1, e.z, e.radius, c.glow, 0.6, 1.6)
-        this.particles.burst(e.x, e.y + 0.8, e.z, c.glow, 90, 12, 0.7, 0.9, 6)
-        this.particles.burst(e.x, e.y + 0.8, e.z, c.spark, 50, 6, 0.5, 1.2, -1)
+        const p = palette(e.ability)
+        if (e.ability === 'eruption') {
+          fx.flash(e.x, e.y + 1, e.z, e.radius * 0.5, p, 0.4)
+          fx.firePillar(e.x, e.y, e.z, e.radius * 0.55, 9, '#ffcf5a', '#d93a06', 1.0)
+          fx.shockwave(e.x, e.y + 0.1, e.z, e.radius * 1.6, '#ffb347', 0.6)
+          fx.decal(e.x, e.y, e.z, e.radius * 1.1, '#120804', true, 6)
+          for (let i = 0; i < 120; i++) {
+            const ang = Math.random() * Math.PI * 2
+            const sp = 3 + Math.random() * 11
+            P.emit(
+              e.x,
+              e.y + 0.5,
+              e.z,
+              Math.cos(ang) * sp,
+              4 + Math.random() * 9,
+              Math.sin(ang) * sp,
+              i % 3 ? '#ff7a1a' : '#3f2a20',
+              0.7,
+              1.2,
+              1,
+              14,
+            )
+          }
+        } else {
+          // Future Sight: the vision collapses into the target
+          fx.flash(e.x, e.y + 1.2, e.z, 1.4, p, 0.35)
+          fx.shockwave(e.x, e.y + 1.2, e.z, e.radius * 2, p.glow, 0.5, true)
+          fx.shockwave(e.x, e.y + 0.1, e.z, e.radius * 1.4, p.spark, 0.5)
+          P.burst(e.x, e.y + 1.2, e.z, p.spark, 70, 10, 0.5, 0.8)
+        }
         break
       }
       case 'interrupt': {
         const f = fighterPos(e.dst)
         if (!f) return
-        this.flash(f.x, f.y + f.height * 0.75, f.z, '#ffffff', 0.6, 0.25)
-        this.particles.burst(f.x, f.y + f.height * 0.75, f.z, '#e0f2fe', 40, 9, 0.35, 0.5, 6)
-        this.ring(f.x, f.y + f.height * 0.75, f.z, 1.2, '#7dd3fc', 0.35, 4)
+        const y = f.y + f.height * 0.75
+        fx.flash(f.x, y, f.z, 0.8, { core: '#ffffff', glow: '#7dd3fc', spark: '#e0f2fe' }, 0.25)
+        fx.shockwave(f.x, y, f.z, 2.2, '#bae6fd', 0.35, true)
+        for (let i = 0; i < 40; i++) {
+          P.emit(
+            f.x,
+            y,
+            f.z,
+            (Math.random() - 0.5) * 12,
+            (Math.random() - 0.2) * 10,
+            (Math.random() - 0.5) * 12,
+            i % 2 ? '#ffffff' : '#7dd3fc',
+            0.3,
+            0.45,
+            2,
+            12,
+          )
+        }
         break
       }
       case 'heal': {
         if (e.tick) return
         const f = fighterPos(e.dst)
         if (!f) return
-        const c = abilityColors(e.ability)
-        for (let i = 0; i < 26; i++) {
+        const p = palette(e.ability)
+        for (let i = 0; i < 30; i++) {
           const a2 = Math.random() * Math.PI * 2
-          const r = Math.random() * 0.6
-          this.particles.emit(
+          const r = 0.3 + Math.random() * 0.5
+          P.emit(
             f.x + Math.cos(a2) * r,
-            f.y + 0.2,
+            f.y + 0.2 + Math.random() * 0.4,
             f.z + Math.sin(a2) * r,
             0,
-            2.5 + Math.random() * 2,
+            2.5 + Math.random() * 2.5,
             0,
-            c.spark,
+            i % 2 ? p.spark : p.glow,
             0.35,
-            1.0,
+            1.1,
             1,
           )
         }
-        this.ring(f.x, f.y + 0.1, f.z, 0.9, c.glow, 0.6, 1.5)
+        fx.shockwave(f.x, f.y + 0.1, f.z, 1.4, p.glow, 0.6)
+        break
+      }
+      case 'aura': {
+        if (e.action !== 'apply') return
+        const f = fighterPos(e.dst)
+        if (!f) return
+        if (e.aura === 'paralysis') fx.shockwave(f.x, f.y + 1, f.z, 1.4, '#fde047', 0.3, true)
+        if (e.aura === 'hypnosis' || e.aura === 'sleep-powder')
+          fx.shockwave(f.x, f.y + 2, f.z, 1.2, '#c4b5fd', 0.5)
         break
       }
       case 'death': {
         const f = fighterPos(e.dst)
         if (!f) return
-        this.particles.burst(f.x, f.y + 1, f.z, '#ffffff', 60, 8, 0.5, 1.0, 3)
-        this.ring(f.x, f.y + 0.1, f.z, 1.5, '#ffffff', 0.8, 5)
+        fx.flash(f.x, f.y + 1, f.z, 1.1, { core: '#ffffff', glow: '#fda4af', spark: '#ffffff' }, 0.4)
+        fx.shockwave(f.x, f.y + 0.1, f.z, 3.5, '#ffffff', 0.7)
+        P.burst(f.x, f.y + 1, f.z, '#ffffff', 60, 8, 0.5, 1.0, 3)
         break
       }
       default:
@@ -416,114 +609,324 @@ export class Vfx {
     }
   }
 
+  // Effects at the target when a targeted spell lands.
+  private arrive(a: AbilityDef, x: number, y: number, z: number): void {
+    const P = this.particles
+    const fx = this.fx
+    const p = palette(a.id)
+    switch (a.id) {
+      case 'fire-blast':
+        fx.flash(x, y, z, 1.6, p, 0.34)
+        fx.shockwave(x, y - 1, z, 4.5, '#ffb347', 0.5)
+        fx.shockwave(x, y, z, 2.6, '#ff7a1a', 0.35, true)
+        fx.firePillar(x, y - 1.1, z, 1.4, 4.6, '#ffcf5a', '#e2450a', 0.7)
+        fx.decal(x, y - 1.1, z, 1.8, '#1a0c06', true, 4)
+        P.burst(x, y, z, '#ffb347', 70, 10, 0.55, 0.7, 5)
+        break
+      case 'hypnosis':
+        for (let k = 0; k < 4; k++)
+          fx.shockwave(x, y + 0.6, z, 1.4 + k * 0.9, k % 2 ? p.spark : p.glow, 0.45 + k * 0.15, true)
+        fx.flash(x, y + 0.6, z, 0.9, p, 0.3)
+        P.burst(x, y + 0.6, z, p.spark, 40, 3.5, 0.45, 1.1)
+        break
+      case 'toxic':
+        fx.flash(x, y, z, 0.9, p, 0.3)
+        for (let i = 0; i < 40; i++)
+          P.emit(
+            x,
+            y,
+            z,
+            (Math.random() - 0.5) * 5,
+            Math.random() * 4,
+            (Math.random() - 0.5) * 5,
+            i % 2 ? '#a855f7' : '#84cc16',
+            0.5,
+            1,
+            1.5,
+            3,
+          )
+        break
+      case 'future-sight':
+        fx.shockwave(x, y + 1.5, z, 2.4, p.glow, 0.7)
+        fx.shockwave(x, y + 0.1, z, 2.6, p.spark, 0.8)
+        P.burst(x, y + 1.5, z, p.spark, 36, 2.5, 0.45, 0.9)
+        break
+      default:
+        // heals and buffs on allies
+        fx.flash(x, y, z, 0.6, p, 0.3)
+        P.burst(x, y, z, p.spark, 24, 3, 0.4, 0.8, -0.5)
+        break
+    }
+  }
+
+  // ---- per-frame ---------------------------------------------------------
+
   update(dt: number, serverTime: number, fighters: readonly FighterView[]): void {
     this.time += dt
+    fxTime.value = this.time
+    this.fighters = fighters
+    const P = this.particles
     for (const v of this.projectiles.values()) {
       const t = Math.max(0, Math.min(0.2, serverTime - v.t0))
       const x = v.x + v.vx * t
       const y = v.y + v.vy * t - 0.5 * v.gravity * t * t
       const z = v.z + v.vz * t
       v.mesh.position.set(x, y, z)
-      const pulse = 1 + Math.sin(this.time * 30) * 0.08
-      v.mesh.scale.setScalar(pulse)
-      this.particles.emit(
-        x,
-        y,
-        z,
-        (Math.random() - 0.5) * 0.6,
-        (Math.random() - 0.5) * 0.6,
-        (Math.random() - 0.5) * 0.6,
-        v.color.glow,
-        0.32,
-        0.28,
-        4,
-      )
+      tmp.set(v.vx, v.vy - v.gravity * t, v.vz)
+      if (tmp.lengthSq() > 0.01) v.mesh.quaternion.setFromUnitVectors(new Vector3(0, 0, 1), tmp.normalize())
+      if (v.spin) {
+        v.spin.rotation.x += dt * 9
+        v.spin.rotation.y += dt * 5
+      }
+      const el = getAbility(v.ability)?.element
+      if (el === 'fire') {
+        for (let i = 0; i < 3; i++)
+          P.emit(
+            x,
+            y,
+            z,
+            (Math.random() - 0.5) * 1.2,
+            0.6 + Math.random(),
+            (Math.random() - 0.5) * 1.2,
+            i === 0 ? '#ffd166' : i === 1 ? v.p.glow : '#7a2e12',
+            0.45,
+            0.32,
+            3,
+          )
+      } else if (el === 'water') {
+        P.emit(
+          x,
+          y,
+          z,
+          (Math.random() - 0.5) * 0.6,
+          (Math.random() - 0.5) * 0.6,
+          (Math.random() - 0.5) * 0.6,
+          i2(v.p),
+          0.22,
+          0.3,
+          4,
+          6,
+        )
+      } else if (el === 'grass') {
+        P.emit(
+          x,
+          y,
+          z,
+          (Math.random() - 0.5) * 1.5,
+          (Math.random() - 0.5) * 1.5,
+          (Math.random() - 0.5) * 1.5,
+          Math.random() < 0.5 ? '#fde68a' : v.p.glow,
+          0.3,
+          0.6,
+          2,
+          -0.3,
+        )
+      } else {
+        P.emit(
+          x,
+          y,
+          z,
+          (Math.random() - 0.5) * 0.8,
+          (Math.random() - 0.5) * 0.8,
+          (Math.random() - 0.5) * 0.8,
+          v.p.glow,
+          0.32,
+          0.3,
+          4,
+        )
+      }
     }
     for (const h of this.hazards.values()) {
-      h.mat.uniforms.uTime!.value = this.time
       h.mat.uniforms.uLife!.value = Math.min(1, h.rem * 3, (h.total - h.rem) * 6 + 0.2)
+      const r = (h.mesh.geometry as CircleGeometry).parameters.radius
+      for (let i = 0; i < 3; i++) {
+        const a = Math.random() * Math.PI * 2
+        const d = Math.sqrt(Math.random()) * r
+        P.emit(
+          h.mesh.position.x + Math.cos(a) * d,
+          h.mesh.position.y + Math.random() * 1.5,
+          h.mesh.position.z + Math.sin(a) * d,
+          0,
+          0.5,
+          0,
+          '#bbf7d0',
+          0.5,
+          0.9,
+          1,
+        )
+      }
     }
     for (const d of this.delayed.values()) {
-      d.mat.uniforms.uTime!.value = this.time
       d.mat.uniforms.uFill!.value = 1 - Math.max(0, d.rem) / d.total
       d.mat.uniforms.uLife!.value = 1
     }
     for (const [id, b] of this.beams) {
       b.ttl -= dt
-      ;(b.mesh.material as MeshBasicMaterial).opacity = Math.min(0.85, b.ttl * 8)
+      b.mat.uniforms.uLife!.value = Math.min(1, b.ttl * 7)
       if (b.ttl <= 0) {
-        this.group.remove(b.mesh)
+        this.fx.dispose(b)
         this.beams.delete(id)
       }
     }
-    for (let i = this.transients.length - 1; i >= 0; i--) {
-      const t = this.transients[i]
-      if (!t) continue
-      t.ttl -= dt
-      const k = 1 - t.ttl / t.total
-      const s = 1 + t.grow * k
-      if (t.mesh.geometry.type === 'SphereGeometry') t.mesh.scale.multiplyScalar(1 + t.grow * dt)
-      else t.mesh.scale.set(s, s, s)
-      if (t.fade) (t.mesh.material as MeshBasicMaterial).opacity = Math.max(0, 1 - k)
-      if (t.ttl <= 0) {
-        this.group.remove(t.mesh)
-        if (t.mesh.geometry !== this.sphereGeo) t.mesh.geometry.dispose()
-        ;(t.mesh.material as MeshBasicMaterial).dispose()
-        this.transients.splice(i, 1)
-      }
-    }
 
-    // Status effects drawn on fighters
+    this.updateRunes(fighters)
+    this.updateAuraMeshes(fighters)
+
     for (const f of fighters) {
       if (!f.alive) continue
       if (f.dashing) {
-        for (let i = 0; i < 4; i++)
-          this.particles.emit(f.x, f.y + 0.4 + Math.random() * 1.2, f.z, 0, 0.3, 0, f.dashColor, 0.5, 0.35, 3)
+        for (let i = 0; i < 5; i++)
+          P.emit(
+            f.x + (Math.random() - 0.5) * 0.4,
+            f.y + 0.4 + Math.random() * 1.2,
+            f.z + (Math.random() - 0.5) * 0.4,
+            0,
+            0.3,
+            0,
+            f.dashColor,
+            0.55,
+            0.4,
+            3,
+          )
       }
       for (const id of f.auras) this.auraParticles(id, f)
     }
+    this.fx.update(dt)
     this.particles.update(dt)
+  }
+
+  // Rotating rune circle under anyone with a cast bar.
+  private updateRunes(fighters: readonly FighterView[]): void {
+    for (const r of this.runes.values()) r.seen = false
+    for (const f of fighters) {
+      if (!f.alive || !f.cast) continue
+      const a = getAbility(f.cast)
+      if (!a || !(a.castTime && a.castTime > 0)) continue
+      let r = this.runes.get(f.id)
+      if (!r) {
+        const made = this.fx.rune(palette(a.id).glow, 1.25)
+        r = { mesh: made.mesh, mat: made.mat, seen: true }
+        this.runes.set(f.id, r)
+      }
+      r.seen = true
+      const frac = f.castFrac ?? 0
+      r.mesh.position.set(f.x, f.y + 0.05, f.z)
+      r.mesh.scale.setScalar(1.0 + frac * 0.4)
+      r.mat.uniforms.uLife!.value = Math.min(1, 0.4 + frac)
+      // particles drawn in toward the hands
+      const hx = f.x + Math.cos(f.yaw) * 0.5
+      const hz = f.z + Math.sin(f.yaw) * 0.5
+      const hy = f.y + 1.2
+      const ang = Math.random() * Math.PI * 2
+      const d = 1.2 + Math.random() * 0.6
+      const sx = hx + Math.cos(ang) * d
+      const sz = hz + Math.sin(ang) * d
+      const sy = hy + (Math.random() - 0.5) * 1.2
+      this.particles.emit(
+        sx,
+        sy,
+        sz,
+        (hx - sx) * 3,
+        (hy - sy) * 3,
+        (hz - sz) * 3,
+        palette(a.id).spark,
+        0.3,
+        0.32,
+        0,
+      )
+    }
+    for (const [id, r] of this.runes) {
+      if (!r.seen) {
+        this.fx.dispose(r)
+        this.runes.delete(id)
+      }
+    }
+  }
+
+  // Mesh-based status effects that read better than particles alone.
+  private updateAuraMeshes(fighters: readonly FighterView[]): void {
+    for (const v of this.auraFx.values()) v.seen = false
+    for (const f of fighters) {
+      if (!f.alive) continue
+      for (const aura of f.auras) {
+        const key = `${f.id}:${aura}`
+        let v = this.auraFx.get(key)
+        if (!v) {
+          const made =
+            aura === 'fire-spin'
+              ? this.fx.flameRing('#ffcf5a', '#d93a06', 0.95, 2.2)
+              : aura === 'aqua-ring'
+                ? this.fx.waterRing('#67e8f9', 0.85)
+                : aura === 'acid-armor'
+                  ? this.fx.shield('#a3e635', 1.25, true)
+                  : aura === 'hypnosis' || aura === 'sleep-powder'
+                    ? this.fx.shield('#a78bfa', 1.15, false)
+                    : null
+          if (!made) continue
+          v = { mesh: made.mesh, mat: made.mat, seen: true }
+          this.auraFx.set(key, v)
+        }
+        v.seen = true
+        if (aura === 'fire-spin') {
+          v.mesh.position.set(f.x, f.y + 1.1, f.z)
+          v.mesh.rotation.y += 0.15
+        } else if (aura === 'aqua-ring') {
+          v.mesh.position.set(f.x, f.y + 0.6 + Math.sin(this.time * 2) * 0.35, f.z)
+          v.mesh.rotation.z = this.time * 2
+        } else {
+          v.mesh.position.set(f.x, f.y + f.height * 0.55, f.z)
+          v.mat.uniforms.uLife!.value = aura === 'acid-armor' ? 0.9 : 0.35
+        }
+      }
+    }
+    for (const [key, v] of this.auraFx) {
+      if (!v.seen) {
+        this.fx.dispose(v)
+        this.auraFx.delete(key)
+      }
+    }
   }
 
   private auraParticles(id: string, f: FighterView): void {
     const r = Math.random
+    const P = this.particles
     const head = f.y + f.height + 0.25
     switch (id) {
       case 'burn':
-      case 'fire-spin':
-        if (r() < 0.6)
-          this.particles.emit(
+        if (r() < 0.7)
+          P.emit(
             f.x + (r() - 0.5) * 0.7,
             f.y + r() * f.height,
             f.z + (r() - 0.5) * 0.7,
             0,
-            2.2,
+            2.4,
             0,
             r() < 0.5 ? '#ff7a1a' : '#ffd166',
-            0.35,
+            0.4,
             0.5,
             1,
           )
-        if (id === 'fire-spin' && r() < 0.8) {
-          const a = this.time * 9 + r() * 6
-          this.particles.emit(
-            f.x + Math.cos(a) * 0.9,
-            f.y + r() * 1.6,
-            f.z + Math.sin(a) * 0.9,
-            -Math.sin(a) * 3,
-            1.2,
-            Math.cos(a) * 3,
-            '#ff5a14',
-            0.45,
-            0.35,
-            1,
-          )
-        }
         break
+      case 'fire-spin': {
+        const a = this.time * 9 + r() * 6
+        P.emit(
+          f.x + Math.cos(a) * 0.9,
+          f.y + r() * 1.8,
+          f.z + Math.sin(a) * 0.9,
+          -Math.sin(a) * 3,
+          1.5,
+          Math.cos(a) * 3,
+          '#ff5a14',
+          0.45,
+          0.35,
+          1,
+        )
+        break
+      }
       case 'poison':
       case 'badly-poisoned':
-        if (r() < 0.35)
-          this.particles.emit(
+        if (r() < 0.4)
+          P.emit(
             f.x + (r() - 0.5) * 0.6,
             f.y + r() * f.height,
             f.z + (r() - 0.5) * 0.6,
@@ -531,14 +934,14 @@ export class Vfx {
             0.9,
             0,
             id === 'poison' ? '#a3e635' : '#a855f7',
-            0.3,
+            0.32,
             0.8,
             0.5,
           )
         break
       case 'bleed':
-        if (r() < 0.25)
-          this.particles.emit(
+        if (r() < 0.3)
+          P.emit(
             f.x + (r() - 0.5) * 0.4,
             f.y + 1 + r() * 0.5,
             f.z + (r() - 0.5) * 0.4,
@@ -546,7 +949,7 @@ export class Vfx {
             -0.5,
             0,
             '#dc2626',
-            0.25,
+            0.28,
             0.6,
             0.5,
             6,
@@ -554,21 +957,21 @@ export class Vfx {
         break
       case 'hypnosis':
       case 'sleep-powder':
-        if (r() < 0.06) this.particles.emit(f.x + 0.2, head, f.z, 0.3, 0.6, 0, '#e9d5ff', 0.55, 1.4, 0.3)
+        if (r() < 0.07) P.emit(f.x + 0.2, head, f.z, 0.3, 0.6, 0, '#e9d5ff', 0.6, 1.4, 0.3)
         break
       case 'confusion': {
         const a = this.time * 5
         for (let k = 0; k < 3; k++) {
           const b = a + (k * Math.PI * 2) / 3
-          this.particles.emit(
-            f.x + Math.cos(b) * 0.45,
+          P.emit(
+            f.x + Math.cos(b) * 0.5,
             head,
-            f.z + Math.sin(b) * 0.45,
+            f.z + Math.sin(b) * 0.5,
             0,
             0,
             0,
-            '#f0abfc',
-            0.35,
+            k === 0 ? '#fde047' : '#f0abfc',
+            0.4,
             0.06,
             0,
           )
@@ -576,8 +979,8 @@ export class Vfx {
         break
       }
       case 'paralysis':
-        if (r() < 0.5)
-          this.particles.emit(
+        if (r() < 0.6)
+          P.emit(
             f.x + (r() - 0.5) * 0.9,
             f.y + r() * f.height,
             f.z + (r() - 0.5) * 0.9,
@@ -591,12 +994,12 @@ export class Vfx {
           )
         break
       case 'psychic-silence':
-        if (r() < 0.2) this.particles.emit(f.x, head, f.z, r() - 0.5, 0.2, r() - 0.5, '#f5d0fe', 0.4, 0.5, 1)
+        if (r() < 0.25) P.emit(f.x, head, f.z, r() - 0.5, 0.2, r() - 0.5, '#f5d0fe', 0.45, 0.5, 1)
         break
       case 'aqua-ring':
       case 'aromatherapy': {
         const a = this.time * 3 + r() * 0.3
-        this.particles.emit(
+        P.emit(
           f.x + Math.cos(a) * 0.8,
           f.y + 0.3 + r() * 1.2,
           f.z + Math.sin(a) * 0.8,
@@ -611,45 +1014,49 @@ export class Vfx {
         break
       }
       case 'acid-armor':
-        if (r() < 0.6)
-          this.particles.emit(
+        if (r() < 0.4)
+          P.emit(
             f.x + (r() - 0.5) * 1.1,
             f.y + r() * f.height,
             f.z + (r() - 0.5) * 1.1,
             0,
-            0.4,
+            -0.6,
             0,
             '#bef264',
-            0.4,
-            0.4,
+            0.35,
+            0.5,
             1,
+            4,
           )
         break
       case 'flame-charge':
-        if (r() < 0.5)
-          this.particles.emit(f.x, f.y + 0.2, f.z, r() - 0.5, 0.8, r() - 0.5, '#ff9a3a', 0.4, 0.4, 1)
+        if (r() < 0.6) P.emit(f.x, f.y + 0.2, f.z, r() - 0.5, 0.8, r() - 0.5, '#ff9a3a', 0.45, 0.4, 1)
         break
       case 'surf-slow':
-        if (r() < 0.3)
-          this.particles.emit(
+        if (r() < 0.35)
+          P.emit(
             f.x + (r() - 0.5) * 0.6,
-            f.y + 1.2,
+            f.y + 1.4,
             f.z + (r() - 0.5) * 0.6,
             0,
             -2,
             0,
             '#7dd3fc',
-            0.2,
+            0.22,
             0.4,
             0.5,
             4,
           )
         break
       case 'heal-block':
-        if (r() < 0.12) this.particles.emit(f.x, f.y + 0.2, f.z, 0, 0.5, 0, '#7f1d1d', 0.6, 1, 1)
+        if (r() < 0.15) P.emit(f.x, f.y + 0.2, f.z, 0, 0.5, 0, '#991b1b', 0.6, 1, 1)
         break
       default:
         break
     }
   }
+}
+
+function i2(p: Palette): string {
+  return Math.random() < 0.5 ? p.spark : '#ffffff'
 }
