@@ -30,6 +30,10 @@ export class TitleScreen {
     const links = el('div', 'flex gap-5 text-sm font-semibold text-zinc-300', row)
     this.change = el('button', 'hover:text-white transition', links, 'Change class')
     this.training = el('button', 'hover:text-white transition', links, 'Training')
+    const touchOnly =
+      window.matchMedia('(pointer: coarse)').matches && !window.matchMedia('(pointer: fine)').matches
+    if (touchOnly)
+      el('div', 'mt-2 text-xs font-semibold text-amber-200/90', row, 'Keyboard and mouse required')
   }
 
   setClass(id: ClassId | null): void {
