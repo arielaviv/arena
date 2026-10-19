@@ -55,7 +55,7 @@ export class World {
     let best = Number.NEGATIVE_INFINITY
     for (const s of this.surfaces) {
       const h = this.surfaceHeight(s, x, z)
-      if (h === h && h <= maxY && h > best) best = h
+      if (!Number.isNaN(h) && h <= maxY && h > best) best = h
     }
     for (const p of this.prisms) {
       if (!p.enabled || (p.mask & Block.Move) === 0 || p.tag === 'barrier') continue
@@ -178,7 +178,7 @@ export class World {
       }
       if (t < 0 || t >= best) continue
       const h = this.surfaceHeight(s, ox + dx * t, oz + dz * t)
-      if (h !== h) continue
+      if (Number.isNaN(h)) continue
       best = t
       out.t = t
       out.nx = nx
