@@ -1,0 +1,82 @@
+import type { AbilityDef } from '../../shared/combat/types'
+
+// 24x24 stroke icons drawn inline so the HUD needs no image assets.
+const PATHS: Record<string, string> = {
+  bolt: 'M5 19 L19 5 M12 5 h7 v7',
+  orb: 'M12 12 m-6 0 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0 M12 3 v2 M12 19 v2 M3 12 h2 M19 12 h2',
+  beam: 'M3 12 h18 M3 8 h12 M3 16 h12',
+  wave: 'M2 15 q5 -8 10 0 t10 0 M2 10 q5 -8 10 0 t10 0',
+  slash: 'M5 19 L19 5 M8 21 L21 8',
+  dash: 'M3 12 h14 M12 6 l6 6 -6 6 M3 7 h5 M3 17 h5',
+  heal: 'M12 5 v14 M5 12 h14',
+  drop: 'M12 3 C12 3 5 11 5 15 a7 7 0 0 0 14 0 C19 11 12 3 12 3 Z',
+  shield: 'M12 3 l7 3 v6 c0 5 -3 8 -7 9 c-4 -1 -7 -4 -7 -9 V6 Z',
+  sleep: 'M5 6 h6 l-6 7 h6 M13 12 h5 l-5 6 h5',
+  confuse: 'M12 12 m0 -1 a1 1 0 1 1 -1 1 a3 3 0 1 1 3 3 a5 5 0 1 1 -5 -5 a7 7 0 1 1 7 7',
+  stun: 'M13 2 L4 14 h7 l-1 8 9 -12 h-7 Z',
+  root: 'M12 21 V10 M12 14 c-4 0 -6 -3 -6 -7 M12 14 c4 0 6 -3 6 -7 M8 21 h8',
+  interrupt: 'M6 6 L18 18 M12 3 a9 9 0 1 0 0.01 0',
+  meteor: 'M14 10 m-5 0 a5 5 0 1 0 10 0 a5 5 0 1 0 -10 0 M3 3 L10 7 M5 2 L11 5 M2 6 L8 9',
+  skull: 'M6 10 a6 6 0 1 1 12 0 v4 h-3 v3 h-6 v-3 H6 Z M9 10 h0.01 M15 10 h0.01',
+  eye: 'M2 12 s4 -7 10 -7 10 7 10 7 -4 7 -10 7 S2 12 2 12 Z M12 12 m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0',
+  leaf: 'M5 19 C5 9 11 4 20 4 C20 13 15 19 5 19 Z M5 19 L13 11',
+  flower:
+    'M12 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M12 4 a3 3 0 0 1 0 6 a3 3 0 0 1 0 -6 M12 14 a3 3 0 0 1 0 6 a3 3 0 0 1 0 -6 M4 12 a3 3 0 0 1 6 0 a3 3 0 0 1 -6 0 M14 12 a3 3 0 0 1 6 0 a3 3 0 0 1 -6 0',
+  berry: 'M12 9 m-6 6 a6 6 0 1 0 12 0 a6 6 0 1 0 -12 0 M12 9 c0 -3 2 -5 5 -6',
+  burn: 'M12 3 c3 4 6 6 6 11 a6 6 0 0 1 -12 0 c0 -3 2 -5 3 -6 c0 3 1 4 3 5 c0 -4 -1 -7 0 -10 Z',
+  poison: 'M9 3 h6 M10 3 v5 l-5 9 a3 3 0 0 0 3 4 h8 a3 3 0 0 0 3 -4 l-5 -9 V3',
+  toxic:
+    'M12 12 m-2 0 a2 2 0 1 0 4 0 a2 2 0 1 0 -4 0 M12 4 a8 8 0 0 1 7 4 M5 8 a8 8 0 0 1 7 -4 M19 16 a8 8 0 0 1 -14 0',
+  bleed: 'M12 3 C12 3 6 10 6 14 a6 6 0 0 0 12 0 C18 10 12 3 12 3 Z M9 15 a3 3 0 0 0 3 3',
+  'heal-block': 'M12 5 v14 M5 12 h14 M4 4 L20 20',
+  speed: 'M4 17 l6 -5 -6 -5 M11 17 l6 -5 -6 -5',
+  slow: 'M12 3 v18 M5 7 l14 10 M19 7 L5 17',
+  hot: 'M12 21 c-5 -3 -8 -6 -8 -10 a4 4 0 0 1 8 -2 a4 4 0 0 1 8 2 c0 4 -3 7 -8 10 Z',
+  silence: 'M4 9 h4 l5 -4 v14 l-5 -4 H4 Z M16 9 l5 6 M21 9 l-5 6',
+  teleport: 'M12 3 v4 M12 17 v4 M3 12 h4 M17 12 h4 M6 6 l3 3 M15 15 l3 3 M6 18 l3 -3 M15 9 l3 -3',
+  fang: 'M5 5 h14 l-3 6 -2 -3 -2 8 -2 -8 -2 3 Z',
+  cast: 'M12 12 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 M12 7 v5 l3 2',
+}
+
+export function iconSvg(name: string, color = 'currentColor', size = 22): string {
+  const d = PATHS[name] ?? PATHS.orb
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`
+}
+
+const ABILITY_ICON: Record<string, string> = {
+  ember: 'bolt',
+  'fire-blast': 'burn',
+  'fire-spin': 'root',
+  'flame-charge': 'dash',
+  'fire-fang': 'fang',
+  eruption: 'meteor',
+  'water-gun': 'drop',
+  'life-dew': 'heal',
+  surf: 'wave',
+  'aqua-ring': 'hot',
+  'aqua-jet': 'dash',
+  'hydro-pump': 'beam',
+  'poison-jab': 'slash',
+  'night-slash': 'bleed',
+  glare: 'eye',
+  'acid-armor': 'shield',
+  'sucker-punch': 'interrupt',
+  toxic: 'skull',
+  psybeam: 'beam',
+  hypnosis: 'sleep',
+  'confuse-ray': 'confuse',
+  teleport: 'teleport',
+  extrasensory: 'interrupt',
+  'future-sight': 'eye',
+  'pollen-puff': 'orb',
+  'floral-healing': 'flower',
+  'sleep-powder': 'sleep',
+  aromatherapy: 'hot',
+  'vine-whip': 'leaf',
+  'jungle-healing': 'heal',
+  'lum-berry': 'berry',
+}
+
+export function abilityIcon(a: AbilityDef): string {
+  return ABILITY_ICON[a.id] ?? 'orb'
+}
