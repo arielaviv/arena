@@ -268,9 +268,12 @@ export class Hud {
     this.myDebuffs.update(me, (h) => h)
 
     // Party and arena frames
-    const allies = view.fighters.filter(
-      (f) => f.team === me.team && (view.mode === 'arena' || f.control !== 'dummy' || f.dummyRole === 'ally'),
-    )
+    const allies = view.fighters
+      .filter(
+        (f) =>
+          f.team === me.team && (view.mode === 'arena' || f.control !== 'dummy' || f.dummyRole === 'ally'),
+      )
+      .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : 0))
     allies.forEach((f, i) => {
       const visible = f.id === me.id || (Math.hypot(f.x - me.x, f.z - me.z) < 40 && view.hasLos(me, f))
       this.party[i]?.update(f, me.team, me.focus === f.id, visible, dt)

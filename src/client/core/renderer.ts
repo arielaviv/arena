@@ -121,6 +121,30 @@ export class Renderer {
     this.camera.updateProjectionMatrix()
   }
 
+  // Compile a scene's shaders for the post-processing input target. Programs
+  // compiled for the screen don't match what the composer renders into.
+  async compile(scene: Scene): Promise<void> {
+    const target = this.composer?.inputBuffer ?? null
+    this.gl.setRenderTarget(target)
+    try {
+      await this.gl.compileAsync(scene, this.camera, scene)
+    } finally {
+      this.gl.setRenderTarget(null)
+    }
+  }
+
+  // Draw a scene once into the composer's input buffer. Some GPU backends
+  // (ANGLE on Direct3D) only finish building shaders on the first real draw.
+  warmDraw(scene: Scene, camera: PerspectiveCamera): void {
+    const target = this.composer?.inputBuffer ?? null
+    this.gl.setRenderTarget(target)
+    try {
+      this.gl.render(scene, camera)
+    } finally {
+      this.gl.setRenderTarget(null)
+    }
+  }
+
   render(dt = 0.016): void {
     if (this.composer) this.composer.render(dt)
     else this.gl.render(this.scene, this.camera)

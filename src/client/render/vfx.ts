@@ -165,6 +165,14 @@ export class Vfx {
     scene.add(this.group)
   }
 
+  // Move warm-up meshes in front of a camera so a real draw includes them.
+  warmupVisible(cam: { position: Vector3 }): void {
+    this.group.traverse((o) => {
+      if ((o as Mesh).isMesh && o.position.y < -100)
+        o.position.set(cam.position.x * 0.5 + o.position.x, 2, cam.position.z * 0.5)
+    })
+  }
+
   // One mesh per effect shader, parked under the floor so the renderer can
   // compile them all up front instead of hitching on the first cast.
   warmupObjects(): Group {
