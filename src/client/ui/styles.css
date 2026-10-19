@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Unbounded", system-ui, sans-serif;
+  --font-hud: "Chakra Petch", system-ui, sans-serif;
+  --color-ink-900: #0c0c0f;
+  --color-ink-800: #18181b;
+  --color-ink-700: #212126;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0c0c0f;
+  color: #f4f4f5;
+  font-family: var(--font-hud);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ui .interactive {
+  pointer-events: auto;
+}
