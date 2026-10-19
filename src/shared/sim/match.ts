@@ -8,7 +8,7 @@ import { CLASSES } from '../combat/registry'
 import type { ClassId } from '../combat/types'
 import { type Aim, computeAim, makeAim } from './aim'
 import { World } from './collision'
-import { DT } from './constants'
+import { CAMERA, DT } from './constants'
 import { DummyBrain } from './dummies'
 import { type Control, type Fighter, makeFighter } from './fighter'
 import type { InputCmd } from './input'
@@ -45,6 +45,7 @@ export class MatchSim implements CombatHost {
   readonly rng: Rng
   readonly training: boolean
   readonly mode: MatchMode
+  readonly difficulty: number
   tick = 0
   phase: Phase
   phaseTimer: number
@@ -65,6 +66,7 @@ export class MatchSim implements CombatHost {
     this.rng = new Rng(cfg.seed)
     this.world = new World(this.training ? buildTraining() : buildArena())
     const difficulty = cfg.difficulty ?? 0.4
+    this.difficulty = difficulty
 
     let id = 1
     for (const team of [0, 1] as const) {
@@ -137,9 +139,11 @@ export class MatchSim implements CombatHost {
       q = []
       this.inputQueues.set(id, q)
     }
+    const clean = sanitizeInput(cmd, f.input)
+    if (!clean) return
     const last = q.length > 0 ? (q[q.length - 1]?.seq ?? 0) : f.input.seq
-    if (cmd.seq <= last && cmd.seq !== 0) return
-    q.push(cmd)
+    if (clean.seq <= last && clean.seq !== 0) return
+    q.push(clean)
   }
 
   drainEvents(): SimEvent[] {
@@ -249,6 +253,14 @@ export class MatchSim implements CombatHost {
     }
   }
 
+  // Hand a disconnected player's fighter to the AI.
+  takeOver(id: number): void {
+    const f = this.byId(id)
+    if (f?.control !== 'human' || this.training) return
+    f.control = 'bot'
+    this.brains.set(f.id, new Brain(f.id, this.difficulty, (this.rng.getState() ^ (f.id * 2654435761)) >>> 0))
+  }
+
   // Training toggles
   resetCooldowns(id: number): void {
     const f = this.byId(id)
@@ -276,5 +288,27 @@ export class MatchSim implements CombatHost {
   hurtFromEnvironment(target: Fighter, amount: number): void {
     const src = this.fighters.find((f) => f.team !== target.team) ?? target
     dealDamage(this, src, target, amount, 'environment', false)
+  }
+}
+
+const ALL_BUTTONS = (1 << 11) - 1
+
+function finite(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v)
+}
+
+// Inputs can come from an untrusted network client: clamp everything so a
+// bad packet can never put NaN or out-of-range values into the sim.
+export function sanitizeInput(cmd: InputCmd, prev: InputCmd): InputCmd | null {
+  if (!finite(cmd.seq) || cmd.seq < 0) return null
+  const clamp = (v: unknown, lo: number, hi: number, fallback: number) =>
+    finite(v) ? Math.max(lo, Math.min(hi, v)) : fallback
+  return {
+    seq: Math.floor(cmd.seq),
+    moveX: clamp(cmd.moveX, -1, 1, 0),
+    moveZ: clamp(cmd.moveZ, -1, 1, 0),
+    yaw: finite(cmd.yaw) ? cmd.yaw % (Math.PI * 64) : prev.yaw,
+    pitch: clamp(cmd.pitch, CAMERA.pitchMin, CAMERA.pitchMax, prev.pitch),
+    buttons: finite(cmd.buttons) ? Math.floor(cmd.buttons) & ALL_BUTTONS : 0,
   }
 }

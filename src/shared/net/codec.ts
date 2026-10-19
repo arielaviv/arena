@@ -24,7 +24,11 @@ export function decodeClient(data: string): ClientMessage | null {
     const parsed: unknown = JSON.parse(data)
     if (!isRecord(parsed)) return null
     if (parsed.type === 'input' && isRecord(parsed.cmd)) return parsed as unknown as ClientMessage
+    if (parsed.type === 'inputs' && Array.isArray(parsed.cmds) && parsed.cmds.length <= 16) {
+      return parsed as unknown as ClientMessage
+    }
     if (parsed.type === 'training' && isRecord(parsed.cmd)) return parsed as unknown as ClientMessage
+    if (parsed.type === 'ready') return { type: 'ready' }
     return null
   } catch {
     return null

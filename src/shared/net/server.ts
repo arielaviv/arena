@@ -17,6 +17,8 @@ export class GameServer {
   private readonly clients: ServerClient[] = []
   private acc = 0
   private pending: SimEvent[] = []
+  // Online rooms hold the clock until every player's client has loaded.
+  private gate: { waiting: Set<number>; timeout: number } | null = null
 
   constructor(
     cfg: MatchConfig,
@@ -33,11 +35,38 @@ export class GameServer {
     client.send(encodeServer({ type: 'snap', snap: buildSnapshot(this.sim, []) }))
   }
 
+  // A player dropped: stop sending to them and let the AI take over their fighter.
+  leave(client: ServerClient): void {
+    const i = this.clients.indexOf(client)
+    if (i >= 0) this.clients.splice(i, 1)
+    this.sim.takeOver(client.fighterId)
+  }
+
+  get playerCount(): number {
+    return this.clients.length
+  }
+
+  holdUntilReady(fighterIds: readonly number[], timeout: number): void {
+    this.gate = { waiting: new Set(fighterIds), timeout }
+  }
+
+  get holding(): boolean {
+    return this.gate !== null
+  }
+
   receive(client: ServerClient, data: string): void {
     const msg = decodeClient(data)
     if (!msg) return
+    if (msg.type === 'ready') {
+      this.gate?.waiting.delete(client.fighterId)
+      return
+    }
     if (msg.type === 'input') {
       this.sim.setInput(client.fighterId, msg.cmd)
+      return
+    }
+    if (msg.type === 'inputs') {
+      for (const cmd of msg.cmds) this.sim.setInput(client.fighterId, cmd)
       return
     }
     if (!this.sim.training) return
@@ -60,6 +89,11 @@ export class GameServer {
 
   // Advance by real time; steps the sim in fixed ticks.
   update(dt: number, timeScale = 1): void {
+    if (this.gate) {
+      this.gate.timeout -= dt
+      if (this.gate.waiting.size > 0 && this.gate.timeout > 0) return
+      this.gate = null
+    }
     this.acc += Math.min(dt, 0.25) * timeScale
     while (this.acc >= DT) {
       this.acc -= DT

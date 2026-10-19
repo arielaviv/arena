@@ -133,4 +133,13 @@ export type ServerMessage =
   | { type: 'welcome'; you: number; mode: MatchMode; seed: number }
   | { type: 'snap'; snap: Snapshot }
 
-export type ClientMessage = { type: 'input'; cmd: InputCmd } | { type: 'training'; cmd: TrainingCommand }
+export type ClientMessage =
+  | { type: 'input'; cmd: InputCmd }
+  | { type: 'inputs'; cmds: InputCmd[] }
+  | { type: 'ready' }
+  | { type: 'training'; cmd: TrainingCommand }
+
+// Matchmaking socket (/queue) → client.
+export type QueueMessage =
+  | { type: 'queued'; players: number }
+  | { type: 'match'; room: string; token: string; you: number; theme: 'sky' | 'caldera' }
