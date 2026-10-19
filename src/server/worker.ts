@@ -48,7 +48,7 @@ export class Matchmaker extends DurableObject<Env> {
   private theme: 'sky' | 'caldera' = 'sky'
   private forming = false
 
-  async fetch(req: Request): Promise<Response> {
+  override async fetch(req: Request): Promise<Response> {
     if (req.headers.get('Upgrade') !== 'websocket') return upgradeRequired()
     const url = new URL(req.url)
     const cls = url.searchParams.get('class') ?? ''
@@ -135,7 +135,7 @@ export class Room extends DurableObject<Env> {
   private emptyFor = 0
   private everJoined = false
 
-  async fetch(req: Request): Promise<Response> {
+  override async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url)
     if (url.pathname.endsWith('/init') && req.method === 'POST') {
       if (this.game) return new Response('room already running', { status: 409 })
