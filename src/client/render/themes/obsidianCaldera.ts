@@ -126,9 +126,9 @@ function obsidianMaterial(): MeshToonMaterial {
         {
           vec3 w = vWorldPos;
           float n = fbm(vec2(w.x + w.z, w.y * 0.7) * 0.45);
-          float vein = smoothstep(0.03, 0.0, abs(n - 0.5)) * smoothstep(9.0, 1.0, w.y);
+          float vein = smoothstep(0.016, 0.0, abs(n - 0.5)) * smoothstep(8.0, 0.5, w.y);
           float pulse = 0.7 + 0.3 * sin(uTime * 2.0 + w.y);
-          totalEmissiveRadiance += uLava * vein * pulse * 2.5;
+          totalEmissiveRadiance += uLava * vein * pulse * 1.7;
         }
       `,
     },
