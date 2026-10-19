@@ -4,6 +4,9 @@ import { GameServer, type ServerClient } from '../../shared/net/server'
 import type { MatchConfig } from '../../shared/sim/match'
 
 export interface Transport {
+  readonly online: boolean
+  readonly closed: boolean
+  timeScale: number
   send(msg: ClientMessage): void
   onMessage(cb: (msg: ServerMessage) => void): void
   update(dt: number): void
@@ -23,6 +26,8 @@ interface Packet {
 // Single-player transport: runs the authoritative server in the page and
 // still serialises every message, optionally with fake latency.
 export class LocalTransport implements Transport {
+  readonly online = false
+  readonly closed = false
   readonly server: GameServer
   private readonly client: ServerClient
   private listener: ((msg: ServerMessage) => void) | null = null

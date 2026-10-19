@@ -1,3 +1,4 @@
+import { PerspectiveCamera, Scene } from 'three'
 import { PLAYABLE } from '../../shared/combat/registry'
 import type { ClassId } from '../../shared/combat/types'
 import { buildArena } from '../../shared/sim/layout'
@@ -5,18 +6,22 @@ import { Audio } from '../core/audio'
 import { Input } from '../core/input'
 import { DEFAULT_KEYBINDS, keyLabel } from '../core/keybinds'
 import { type Quality, Renderer } from '../core/renderer'
+import { findMatch, type MatchTicket, roomUrl, serverBase } from '../net/online'
+import { WebSocketTransport } from '../net/wsTransport'
+import { Avatar } from '../render/avatar'
 import { models } from '../render/models'
 import { renderThumbnails } from '../render/thumbs'
+import { Vfx } from '../render/vfx'
 import { type ThemeId, WorldView } from '../render/world'
 import { Session } from '../session'
 import { Hud } from '../ui/hud'
 import { ClassPickScreen, MatchFoundScreen, PauseScreen, ResultsScreen, TitleScreen } from '../ui/screens'
 import { buildArenaMatch, buildTrainingMatch } from './matchmaker'
 import { PerfMonitor } from './perf'
-import { difficultyFor, loadSettings, type Settings, saveSettings } from './settings'
+import { difficultyFor, ensurePlayerName, loadSettings, type Settings, saveSettings } from './settings'
 import { TrainingControls } from './training'
 
-type State = 'title' | 'pick' | 'match' | 'results'
+type State = 'title' | 'pick' | 'queue' | 'match' | 'results'
 
 const MATCH_FOUND_SECONDS = 1.15
 
@@ -40,6 +45,9 @@ export class App {
   private pickMode: 'arena' | 'training' = 'arena'
   private endTimer = 0
   private unlockedFor = 0
+  private queue: { promise: Promise<MatchTicket>; cancel: () => void } | null = null
+  private forceOffline = false
+  prewarmed = false
   // Screenshot runs (?shots) never get pointer lock; skip the resume prompt there.
   private readonly shots: boolean
   private resultShown = false
@@ -137,9 +145,11 @@ export class App {
     this.showMenu()
     // Creature models stream in behind the title; thumbnails follow them.
     models.onLoaded = () => this.session?.refreshModels()
-    void models.loadAll().then(() => {
+    void models.loadAll().then(async () => {
       const thumbs = renderThumbnails()
       for (const [id, url] of thumbs) this.pick.setThumb(id, url)
+      await this.prewarm()
+      this.prewarmed = true
     })
   }
 
@@ -154,6 +164,39 @@ export class App {
       r: keyLabel(b.r),
       c: keyLabel(b.c),
     })
+  }
+
+  // Compile every shader a match can need (both worlds, all creatures, all
+  // effects) while the player is still on the title screen.
+  private async prewarm(): Promise<void> {
+    const shadow = this.renderer.quality === 'high' ? 2048 : this.renderer.quality === 'medium' ? 1024 : 0
+    for (const theme of ['sky', 'caldera'] as const) {
+      const scene = new Scene()
+      const world = new WorldView(scene, buildArena(), theme, shadow)
+      const vfx = new Vfx(scene)
+      vfx.group.add(vfx.warmupObjects())
+      const avatars = PLAYABLE.map((id, i) => {
+        const a = new Avatar(id, i % 2 === 0 ? 0 : 1, 0)
+        a.root.position.set(i * 2, 0, 0)
+        scene.add(a.root)
+        return a
+      })
+      try {
+        await this.renderer.compile(scene)
+      } catch {
+        // best effort
+      }
+      // One real draw from a wide camera so every mesh, shadow and effect
+      // gets its final GPU variant built now rather than mid-countdown.
+      const cam = new PerspectiveCamera(100, this.renderer.camera.aspect, 0.1, 900)
+      cam.position.set(0, 30, 45)
+      cam.lookAt(0, 0, 0)
+      for (const a of avatars) a.root.position.set(a.root.position.x - 4, 0, 6)
+      vfx.warmupVisible(cam)
+      this.renderer.warmDraw(scene, cam)
+      world.dispose()
+      for (const a of avatars) a.dispose()
+    }
   }
 
   private showMenu(): void {
@@ -179,6 +222,12 @@ export class App {
   }
 
   private onKey(code: string): void {
+    if (this.state === 'queue' && code === 'Escape') {
+      this.cancelQueue()
+      this.matchFound.hide()
+      this.goTitle()
+      return
+    }
     if (this.state === 'title' && (code === 'Enter' || code === 'Space')) this.onPlay()
     else if (this.state === 'pick') {
       const n = Number(code.replace('Digit', ''))
@@ -236,7 +285,63 @@ export class App {
     void session.prepare()
   }
 
+  // Online first: queue, and fall back to an offline match if the server
+  // can't be reached so PLAY always lands in a fight.
   startArena(id: ClassId): void {
+    const base = serverBase()
+    if (!base || this.forceOffline) {
+      this.startArenaLocal(id)
+      return
+    }
+    this.cancelQueue()
+    this.session?.dispose()
+    this.session = null
+    this.hideMenuScreens()
+    this.state = 'queue'
+    this.matchFound.search()
+    this.input.lock()
+    const ticket = findMatch(base, id, ensurePlayerName(this.settings), difficultyFor(this.settings))
+    this.queue = ticket
+    ticket.promise
+      .then((t) => {
+        if (this.queue !== ticket || this.state !== 'queue') return
+        this.queue = null
+        const transport = new WebSocketTransport(roomUrl(base, t))
+        this.theme = t.theme
+        this.beginSession(
+          new Session(this.renderer, this.input, this.hud, this.audio, {
+            config: { mode: 'arena', seed: 0, teams: [[], []] },
+            myId: t.you,
+            theme: t.theme,
+            transport,
+            ...this.lag,
+          }),
+        )
+        this.matchFound.play(MATCH_FOUND_SECONDS)
+        this.audio.play('match-found')
+      })
+      .catch(() => {
+        if (this.queue !== ticket || this.state !== 'queue') return
+        this.queue = null
+        // Server unreachable: play offline this session.
+        this.forceOffline = true
+        this.startArenaLocal(id)
+      })
+  }
+
+  private cancelQueue(): void {
+    this.queue?.cancel()
+    this.queue = null
+  }
+
+  private hideMenuScreens(): void {
+    this.title.setVisible(false)
+    this.pick.setVisible(false)
+    this.results.setVisible(false)
+    this.pause.setVisible(false)
+  }
+
+  startArenaLocal(id: ClassId): void {
     const cfg = buildArenaMatch(id, difficultyFor(this.settings))
     // The countdown starts under the MATCH FOUND card, so it adds no wait.
     cfg.countdown = 3 + MATCH_FOUND_SECONDS
@@ -276,6 +381,8 @@ export class App {
   }
 
   private goTitle(): void {
+    this.cancelQueue()
+    this.matchFound.hide()
     this.session?.dispose()
     this.session = null
     this.input.unlock()
@@ -300,6 +407,11 @@ export class App {
       this.unlockedFor = 0
     }
     const s = this.session
+    if (s?.transport.online && s.transport.closed && this.state === 'match' && s.latest?.phase !== 'ended') {
+      // Lost the room mid-match: back to the menu rather than a frozen game.
+      this.goTitle()
+      return
+    }
     if (s) {
       s.update(dt)
       const snap = s.latest

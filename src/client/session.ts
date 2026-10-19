@@ -15,7 +15,7 @@ import type { Input } from './core/input'
 import type { Renderer } from './core/renderer'
 import { Interpolator, type InterpState } from './net/interpolation'
 import { Predictor } from './net/prediction'
-import { LocalTransport } from './net/transport'
+import { LocalTransport, type Transport } from './net/transport'
 import { Avatar } from './render/avatar'
 import { CameraRig } from './render/camera'
 import { type FighterView, Vfx } from './render/vfx'
@@ -28,13 +28,15 @@ export interface SessionOptions {
   theme: ThemeId
   lagMs: number
   jitterMs: number
+  // Online matches pass a WebSocket transport; otherwise the match runs in-page.
+  transport?: Transport
 }
 
 const projected = new Vector3()
 
 // One match (or training visit): transport, prediction, rendering, HUD feed.
 export class Session {
-  readonly transport: LocalTransport
+  readonly transport: Transport
   readonly world: World
   readonly view: WorldView
   readonly mode: 'arena' | 'training'
@@ -82,10 +84,9 @@ export class Session {
     })
     this.vfx = new Vfx(renderer.scene)
     this.cam = new CameraRig(renderer.camera)
-    this.transport = new LocalTransport(opts.config, opts.myId, {
-      lagMs: opts.lagMs,
-      jitterMs: opts.jitterMs,
-    })
+    this.transport =
+      opts.transport ??
+      new LocalTransport(opts.config, opts.myId, { lagMs: opts.lagMs, jitterMs: opts.jitterMs })
     this.transport.onMessage((msg) => {
       if (msg.type === 'snap') this.onSnapshot(msg.snap)
     })
@@ -124,12 +125,20 @@ export class Session {
     const warm = this.vfx.warmupObjects()
     this.renderer.scene.add(warm)
     try {
-      await this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera)
+      await this.renderer.compile(this.renderer.scene)
     } catch {
       // compileAsync is an optimisation; rendering compiles lazily anyway
     }
     this.renderer.scene.remove(warm)
+    // Let the first real frames draw (some drivers finish shader work there)
+    // so the reveal and the countdown start on a smooth frame.
+    const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    await nextFrame()
+    await nextFrame()
+    await nextFrame()
     this.ready = true
+    // Online rooms wait for this before starting the gate countdown.
+    this.transport.send({ type: 'ready' })
   }
 
   private onSnapshot(snap: Snapshot): void {
@@ -288,10 +297,11 @@ export class Session {
 
   update(dt: number): void {
     this.time += dt
-    let scale = this.timeScale
+    // Online the server owns time: no slow motion or hit-stop in the tick rate.
+    let scale = this.transport.online ? 1 : this.timeScale
     if (this.hitStop > 0) {
       this.hitStop -= dt
-      scale *= 0.08
+      if (!this.transport.online) scale *= 0.08
     }
     this.transport.timeScale = scale
     const sdt = dt * scale

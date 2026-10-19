@@ -257,11 +257,34 @@ export class MatchFoundScreen {
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'match-found', parent, '<h1>MATCH FOUND</h1>')
+    this.title = this.root.querySelector('h1') as HTMLHeadingElement
+    show(this.root, false)
+  }
+
+  private readonly title: HTMLHeadingElement
+  searching = false
+
+  // Queue state: same card, dimmer and pulsing, until the server pairs us.
+  search(): void {
+    this.searching = true
+    this.hideAt = 0
+    this.title.textContent = 'FINDING MATCH'
+    this.root.classList.remove('leave', 'enter')
+    this.root.classList.add('searching')
+    show(this.root, true)
+  }
+
+  hide(): void {
+    this.searching = false
+    this.hideAt = 0
+    this.root.classList.remove('searching', 'enter')
     show(this.root, false)
   }
 
   play(duration: number): void {
-    this.root.classList.remove('leave', 'enter')
+    this.searching = false
+    this.title.textContent = 'MATCH FOUND'
+    this.root.classList.remove('leave', 'enter', 'searching')
     void this.root.offsetWidth
     this.root.classList.add('enter')
     show(this.root, true)
@@ -284,6 +307,6 @@ export class MatchFoundScreen {
   }
 
   get visible(): boolean {
-    return this.hideAt > 0
+    return this.hideAt > 0 || this.searching
   }
 }

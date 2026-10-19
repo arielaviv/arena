@@ -10,6 +10,7 @@ export interface Settings {
   streak: number // positive = wins in a row, negative = losses
   matches: number
   keybinds: Keybinds
+  playerName: string
 }
 
 const KEY = 'arena.settings.v1'
@@ -21,6 +22,7 @@ const DEFAULTS: Settings = {
   streak: 0,
   matches: 0,
   keybinds: { ...DEFAULT_KEYBINDS },
+  playerName: '',
 }
 
 export function loadSettings(): Settings {
@@ -31,6 +33,7 @@ export function loadSettings(): Settings {
     if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULTS }
     const merged = { ...DEFAULTS, ...(parsed as Partial<Settings>) }
     merged.keybinds = sanitizeKeybinds((parsed as { keybinds?: unknown }).keybinds)
+    if (typeof merged.playerName !== 'string') merged.playerName = ''
     return merged
   } catch {
     return { ...DEFAULTS }
@@ -49,4 +52,29 @@ export function saveSettings(s: Settings): void {
 export function difficultyFor(s: Settings): number {
   const base = s.matches === 0 ? 0.15 : 0.35
   return Math.max(0.05, Math.min(1, base + s.streak * 0.12))
+}
+
+const HANDLES = [
+  'Ember',
+  'Rift',
+  'Sable',
+  'Nova',
+  'Kite',
+  'Onyx',
+  'Vale',
+  'Echo',
+  'Flint',
+  'Moss',
+  'Rune',
+  'Zest',
+]
+
+// A stable online handle so other players see a name, not "You".
+export function ensurePlayerName(s: Settings): string {
+  if (!s.playerName) {
+    const h = HANDLES[Math.floor(Math.random() * HANDLES.length)] ?? 'Player'
+    s.playerName = `${h}${Math.floor(100 + Math.random() * 900)}`
+    saveSettings(s)
+  }
+  return s.playerName
 }

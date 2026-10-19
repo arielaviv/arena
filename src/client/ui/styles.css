@@ -359,3 +359,20 @@ body {
     background-position: 0 0;
   }
 }
+
+.match-found.searching h1 {
+  background: linear-gradient(180deg, #a1a1aa 0%, #71717a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: mf-search 1.2s ease-in-out infinite;
+}
+
+@keyframes mf-search {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
