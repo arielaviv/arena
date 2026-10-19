@@ -228,6 +228,7 @@ export class App {
     this.hud.setBanner('', '')
     this.input.lock()
     if (!this.settings.qualityChosen) this.perf.arm()
+    void session.prepare()
   }
 
   startArena(id: ClassId): void {
@@ -284,7 +285,7 @@ export class App {
 
   frame(dt: number): void {
     this.perf.frame(dt)
-    this.matchFound.update(dt)
+    this.matchFound.update(dt, this.session?.ready ?? true)
     const s = this.session
     if (s) {
       s.update(dt)

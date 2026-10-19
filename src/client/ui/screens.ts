@@ -256,10 +256,10 @@ export class MatchFoundScreen {
   }
 
   // Returns true on the frame it starts fading out.
-  update(dt: number): boolean {
+  update(dt: number, canFinish = true): boolean {
     if (this.hideAt <= 0) return false
     this.timer += dt
-    if (this.timer >= this.hideAt) {
+    if (this.timer >= this.hideAt && canFinish) {
       this.hideAt = 0
       this.root.classList.remove('enter')
       this.root.classList.add('leave')

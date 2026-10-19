@@ -16,7 +16,17 @@ import type { SimEvent } from '../../shared/combat/events'
 import { getAbility } from '../../shared/combat/registry'
 import type { AbilityDef, Element } from '../../shared/combat/types'
 import type { Snapshot } from '../../shared/net/protocol'
-import { fxTime, orbMaterial } from './fx/materials'
+import {
+  beamMaterial,
+  decalMaterial,
+  flameMaterial,
+  fxTime,
+  orbMaterial,
+  runeMaterial,
+  shieldMaterial,
+  shockwaveMaterial,
+  slashMaterial,
+} from './fx/materials'
 import { FxSystem, type Palette } from './fx/system'
 import { Particles } from './particles'
 import { NOISE_GLSL } from './shaderlib'
@@ -153,6 +163,39 @@ export class Vfx {
     this.fx = new FxSystem(this.particles)
     this.group.add(this.particles.points, this.fx.group)
     scene.add(this.group)
+  }
+
+  // One mesh per effect shader, parked under the floor so the renderer can
+  // compile them all up front instead of hitching on the first cast.
+  warmupObjects(): Group {
+    const g = new Group()
+    const geo = new SphereGeometry(0.5, 8, 6)
+    const p = ELEMENT.fire
+    const mats = [
+      orbMaterial(p.core, p.glow),
+      flameMaterial(p.core, p.glow),
+      shockwaveMaterial(p.glow),
+      shieldMaterial(p.glow),
+      beamMaterial(p.core, p.glow),
+      slashMaterial(p.glow),
+      runeMaterial(p.glow),
+      decalMaterial(p.glow, true),
+      decalMaterial(p.glow, false),
+      hazardMaterial(p.glow),
+      new MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        blending: AdditiveBlending,
+        depthWrite: false,
+      }),
+    ]
+    mats.forEach((m, i) => {
+      const mesh = new Mesh(geo, m)
+      mesh.position.set(i * 1.2, -300, 0)
+      mesh.frustumCulled = false
+      g.add(mesh)
+    })
+    return g
   }
 
   private fighter(id: number): FighterView | undefined {

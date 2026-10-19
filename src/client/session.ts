@@ -54,6 +54,8 @@ export class Session {
   private readonly istate: InterpState = { x: 0, y: 0, z: 0, yaw: 0, pitch: 0, vx: 0, vz: 0 }
   private readonly renderPos = new Vector3()
   onEvent: ((e: SimEvent) => void) | null = null
+  ready = false
+  private firstSnap: (() => void) | null = null
   // Dev/test only: overrides keyboard and mouse so headless runs can play.
   debugInput: { moveX?: number; moveZ?: number; buttons?: number } | null = null
 
@@ -111,6 +113,24 @@ export class Session {
     this.sendTraining({ kind: 'swapClass', classId })
   }
 
+  // Resolves once the world, avatars and every effect shader are compiled.
+  async prepare(): Promise<void> {
+    if (!this.latest) {
+      await new Promise<void>((resolve) => {
+        this.firstSnap = resolve
+      })
+    }
+    const warm = this.vfx.warmupObjects()
+    this.renderer.scene.add(warm)
+    try {
+      await this.renderer.gl.compileAsync(this.renderer.scene, this.renderer.camera)
+    } catch {
+      // compileAsync is an optimisation; rendering compiles lazily anyway
+    }
+    this.renderer.scene.remove(warm)
+    this.ready = true
+  }
+
   private onSnapshot(snap: Snapshot): void {
     const first = this.latest === null
     this.latest = snap
@@ -132,6 +152,10 @@ export class Session {
       av.setClass(f.cls)
     }
     for (const e of snap.events) this.handleEvent(e)
+    if (first && this.firstSnap) {
+      this.firstSnap()
+      this.firstSnap = null
+    }
   }
 
   private fighterView = (id: number): FighterView | undefined => {
