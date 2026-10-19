@@ -369,8 +369,8 @@ export class Avatar {
     if (!this.model && this.classId !== 'dummy' && models.has(this.classId)) this.build()
   }
 
-  hit(): void {
-    this.flash = 1
+  hit(strength = 0.5): void {
+    this.flash = Math.max(this.flash, strength)
   }
 
   trigger(kind: Trigger): void {
@@ -450,8 +450,9 @@ export class Avatar {
   update(dt: number, s: AvatarState, time: number): void {
     this.root.position.set(s.x, s.y, s.z)
     this.root.rotation.y = -s.yaw
-    this.flash = Math.max(0, this.flash - dt * 6)
-    for (const mat of this.flashMats) mat.emissive.setRGB(this.flash, this.flash, this.flash)
+    this.flash = Math.max(0, this.flash - dt * 9)
+    const k = this.flash * this.flash
+    for (const mat of this.flashMats) mat.emissive.setRGB(k, k * 0.92, k * 0.85)
     this.ring.visible = s.alive && !this.isLocal
     if (this.model) {
       this.updateModel(dt, s, time)

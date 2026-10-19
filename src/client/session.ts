@@ -184,7 +184,7 @@ export class Session {
     const me = this.opts.myId
     switch (e.t) {
       case 'damage':
-        this.avatars.get(e.dst)?.hit()
+        if (!e.tick) this.avatars.get(e.dst)?.hit(e.amount >= 100 ? 0.65 : 0.4)
         if (!e.tick && e.amount >= 60) this.avatars.get(e.dst)?.trigger('hit')
         if (e.dst === me && !e.tick) this.cam.addShake(Math.min(0.5, e.amount / 260))
         if (e.src === me && !e.tick)
