@@ -16,8 +16,12 @@ function match(team0: SlotConfig[], team1: SlotConfig[], seed = 1, difficulty = 
   return sim
 }
 
-const bot = (classId: ClassId, name = classId): SlotConfig => ({ classId, name, control: 'bot' })
-const human = (classId: ClassId, name = classId): SlotConfig => ({ classId, name, control: 'human' })
+const bot = (classId: ClassId, name: string = classId): SlotConfig => ({ classId, name, control: 'bot' })
+const human = (classId: ClassId, name: string = classId): SlotConfig => ({
+  classId,
+  name,
+  control: 'human',
+})
 
 function place(f: Fighter, x: number, z: number): void {
   f.pos.set(x, 0, z)

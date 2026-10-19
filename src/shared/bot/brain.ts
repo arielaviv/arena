@@ -77,6 +77,11 @@ export class Brain {
   // This tick's decision
   private press: Slot | null = null
   private intent: Intent = 'fight'
+
+  // Read through a method so control-flow narrowing from the reset above doesn't stick.
+  private currentIntent(): Intent {
+    return this.intent
+  }
   private readonly goal: Point = { x: 0, z: 0 }
   private readonly wp: Point = { x: 0, z: 0 }
 
@@ -151,7 +156,8 @@ export class Brain {
     }
     if (this.press) cmd.buttons |= SLOT_BUTTON[this.press]
 
-    const urgent = this.intent === 'escape' || this.intent === 'juke'
+    const intent = this.currentIntent()
+    const urgent = intent === 'escape' || intent === 'juke'
     const feint = this.feint(f)
     const pressCast = this.press !== null && standsToCast(f.cls.abilities[this.press])
     const casting = f.cast !== null && !f.cast.ability.mobile
