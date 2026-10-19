@@ -1,6 +1,7 @@
 import {
   AdditiveBlending,
   BoxGeometry,
+  CircleGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
@@ -14,6 +15,7 @@ import {
   Object3D,
   PlaneGeometry,
   ShaderMaterial,
+  TorusGeometry,
   Vector3,
 } from 'three'
 import type { WorldGeometry } from '../../../shared/sim/geometry'
@@ -229,7 +231,7 @@ export const SKY_SANCTUM: WorldTheme = {
   id: 'sky',
   name: 'Sky Sanctum',
   exposure: 1.0,
-  bloom: { strength: 0.55, threshold: 0.82, radius: 0.6 },
+  bloom: { strength: 0.6, threshold: 1.05, radius: 0.6 },
   fog: { color: '#f2b08a', near: 70, far: 420 },
   sun: { color: '#ffd7a8', intensity: 2.7, dir: [SUN_DIR.x, SUN_DIR.y, SUN_DIR.z] },
   hemi: { sky: '#ffe6cc', ground: '#7a5a7c', intensity: 1.05 },
@@ -287,40 +289,85 @@ export const SKY_SANCTUM: WorldTheme = {
       else if (s.kind === 'flat') group.add(flatMesh(s, floorMat, 0.6))
     }
 
-    // Pillars: carved monoliths with gold bands, broken tops and floating chunks.
+    // Pillars: tapered temple monoliths with carved bands, gold sun emblems on
+    // every face, a broken capital and stone chunks floating above.
     const floaters: Array<{ mesh: Mesh; baseY: number; phase: number; spin: number }> = []
     const tmp = new Vector3()
     for (const p of pillars) {
       const h = p.y1 - p.y0
-      group.add(boxAt(p.hx * 2 + 0.8, 0.7, p.hz * 2 + 0.8, p.cx, 0.35, p.cz, p.yaw, marbleDark))
-      group.add(boxAt(p.hx * 2 + 0.4, 0.35, p.hz * 2 + 0.4, p.cx, 0.85, p.cz, p.yaw, gold))
-      const shaftH = h - 2.2
-      const shaft = boxAt(p.hx * 2, shaftH, p.hz * 2, p.cx, 1.0 + shaftH / 2, p.cz, p.yaw, marble)
-      shaft.add(withOutline(shaft.geometry, 1.015))
+      group.add(boxAt(p.hx * 2 + 1.1, 0.45, p.hz * 2 + 1.1, p.cx, 0.225, p.cz, p.yaw, marbleDark))
+      group.add(boxAt(p.hx * 2 + 0.55, 0.4, p.hz * 2 + 0.55, p.cx, 0.65, p.cz, p.yaw, marble))
+      group.add(boxAt(p.hx * 2 + 0.3, 0.16, p.hz * 2 + 0.3, p.cx, 0.93, p.cz, p.yaw, gold))
+      const shaftH = h - 2.6
+      const r0 = p.hx * Math.SQRT2
+      const taper = 0.86
+      const shaftGeo = new CylinderGeometry(r0 * taper, r0, shaftH, 4, 1)
+      const shaft = new Mesh(shaftGeo, marble)
+      shaft.position.set(p.cx, 1.0 + shaftH / 2, p.cz)
+      shaft.rotation.y = -p.yaw + Math.PI / 4
+      shaft.castShadow = true
+      shaft.receiveShadow = true
+      shaft.add(withOutline(shaftGeo, 1.012))
       group.add(shaft)
-      // vertical gold inlays on each face
-      for (const [lx, lz, w, d] of [
-        [p.hx + 0.02, 0, 0.06, 0.25],
-        [-p.hx - 0.02, 0, 0.06, 0.25],
-        [0, p.hz + 0.02, 0.25, 0.06],
-        [0, -p.hz - 0.02, 0.25, 0.06],
-      ] as const) {
-        for (const off of [-1.3, 1.3]) {
-          const ox = lz === 0 ? 0 : off
-          const oz = lx === 0 ? 0 : off
-          localToWorld(p, lx + ox, lz + oz, tmp)
-          group.add(boxAt(w, shaftH - 1.2, d, tmp.x, 1.0 + shaftH / 2, tmp.z, p.yaw, gold))
+      // carved horizontal grooves
+      for (let k = 1; k <= 4; k++) {
+        const t = k / 5
+        const w = p.hx * 2 * (1 - (1 - taper) * t) + 0.05
+        const y = 1.0 + shaftH * t
+        group.add(boxAt(w, k === 3 ? 0.32 : 0.09, w, p.cx, y, p.cz, p.yaw, k === 3 ? gold : marbleDark))
+      }
+      // sun emblem on each face, at chest height so it frames pillar play
+      const ey = 3.0
+      const half = p.hx * (1 - (1 - taper) * ((ey - 1.0) / shaftH)) + 0.04
+      for (let face = 0; face < 4; face++) {
+        const a = (face * Math.PI) / 2
+        const lx = Math.cos(a) * half
+        const lz = Math.sin(a) * half
+        localToWorld(p, lx, lz, tmp)
+        const facing = p.yaw + a
+        const ring = new Mesh(new TorusGeometry(0.75, 0.09, 6, 28), gold)
+        ring.position.set(tmp.x, ey, tmp.z)
+        ring.rotation.y = -facing + Math.PI / 2
+        group.add(ring)
+        const disc = new Mesh(new CircleGeometry(0.34, 20), gold)
+        disc.position.set(tmp.x + Math.cos(facing) * 0.01, ey, tmp.z + Math.sin(facing) * 0.01)
+        disc.rotation.y = -facing + Math.PI / 2
+        group.add(disc)
+        for (let ray = 0; ray < 8; ray++) {
+          const ra = (ray / 8) * Math.PI * 2
+          const r = new Mesh(new BoxGeometry(0.05, 0.22, 0.05), gold)
+          const off = 0.52
+          // ray position in the face plane: right vector of the face is (-sin, cos)
+          const rx = -Math.sin(facing) * Math.cos(ra) * off
+          const rz = Math.cos(facing) * Math.cos(ra) * off
+          r.position.set(tmp.x + rx, ey + Math.sin(ra) * off, tmp.z + rz)
+          r.rotation.y = -facing + Math.PI / 2
+          r.rotation.z = ra - Math.PI / 2
+          group.add(r)
         }
       }
-      group.add(boxAt(p.hx * 2 + 0.25, 0.4, p.hz * 2 + 0.25, p.cx, 5.4, p.cz, p.yaw, gold))
       // broken capital
-      const cap = boxAt(p.hx * 2 + 0.6, 0.7, p.hz * 2 + 0.6, p.cx, h - 0.85, p.cz, p.yaw, marbleDark)
-      cap.rotation.z = 0.04
-      group.add(cap)
-      localToWorld(p, -0.6, 0.4, tmp)
-      const chunk = boxAt(2.6, 1.0, 2.2, tmp.x, h + 0.0, tmp.z, p.yaw + 0.3, marble)
-      chunk.rotation.x = 0.12
+      const capY = 1.0 + shaftH
+      group.add(
+        boxAt(
+          p.hx * 2 * taper + 0.7,
+          0.55,
+          p.hz * 2 * taper + 0.7,
+          p.cx,
+          capY + 0.28,
+          p.cz,
+          p.yaw,
+          marbleDark,
+        ),
+      )
+      localToWorld(p, -0.7, 0.5, tmp)
+      const chunk = boxAt(2.4, 1.1, 2.0, tmp.x, capY + 1.05, tmp.z, p.yaw + 0.25, marble)
+      chunk.rotation.x = 0.1
+      chunk.rotation.z = 0.06
+      chunk.add(withOutline(chunk.geometry, 1.03))
       group.add(chunk)
+      localToWorld(p, 0.9, -0.6, tmp)
+      group.add(boxAt(1.2, 0.6, 1.4, tmp.x, capY + 0.85, tmp.z, p.yaw - 0.4, marbleDark))
       for (let i = 0; i < 3; i++) {
         const s = 0.9 + i * 0.35
         const m = new Mesh(new BoxGeometry(s, s * 0.8, s * 1.1), i === 1 ? gold : marble)
@@ -328,6 +375,7 @@ export const SKY_SANCTUM: WorldTheme = {
         localToWorld(p, (i - 1) * 1.6, (i % 2) * 1.2 - 0.6, tmp)
         m.position.set(tmp.x, h + 2 + i * 0.9, tmp.z)
         m.add(withOutline(m.geometry, 1.04))
+        m.userData.dynamic = true
         group.add(m)
         floaters.push({ mesh: m, baseY: m.position.y, phase: i * 2.1 + p.cx, spin: 0.2 + i * 0.12 })
       }
@@ -435,6 +483,7 @@ export const SKY_SANCTUM: WorldTheme = {
       }
       const baseY = -18 + rand() * 40
       g.position.set(Math.cos(a) * r, baseY, Math.sin(a) * r)
+      g.userData.dynamic = true
       group.add(g)
       islands.push({ g, baseY, phase: rand() * 10 })
     }

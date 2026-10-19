@@ -187,7 +187,7 @@ export function driftParticles(
         p.z += cos(t * 0.5 + aSeed * 23.0) * 1.5;
         vec4 mv = modelViewMatrix * vec4(p, 1.0);
         gl_Position = projectionMatrix * mv;
-        gl_PointSize = uSize * (0.5 + aSeed) * (120.0 / -mv.z);
+        gl_PointSize = min(uSize * (0.5 + aSeed) * (120.0 / -mv.z), 9.0);
         float edge = smoothstep(0.0, 0.1, p.y / uHeight) * smoothstep(1.0, 0.85, p.y / uHeight);
         vAlpha = edge * (0.5 + 0.5 * sin(t * 3.0 + aSeed * 10.0));
       }

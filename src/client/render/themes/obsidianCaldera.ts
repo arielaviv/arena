@@ -70,11 +70,22 @@ function hexFloorMaterial(occluders: Array<[number, number, number]>): MeshToonM
           float edge = 0.5 - max(dot(q, s * 0.5), q.x);
           return vec3(edge, id);
         }
+        // Lava shows through a few meandering fault lines and the odd broken
+        // tile edge, not every seam.
+        float faultDist(vec2 p, float ang, float off) {
+          vec2 d = vec2(cos(ang), sin(ang));
+          vec2 n = vec2(-d.y, d.x);
+          float along = dot(p, d);
+          float across = dot(p, n) - off;
+          return abs(across - sin(along * 0.16) * 4.5 - sin(along * 0.43 + off) * 1.3);
+        }
         float crackMask(vec2 p) {
           vec3 hi = hexInfo(p / 1.6);
-          float n = fbm(hi.yz * 3.1);
-          float w = 0.035 + n * 0.03;
-          return smoothstep(w, 0.0, hi.x) * smoothstep(0.25, 0.6, n + 0.2);
+          float edge = 1.0 - smoothstep(0.0, 0.05, hi.x);
+          float d = min(min(faultDist(p, 0.35, 6.0), faultDist(p, 2.1, -9.0)), faultDist(p, 1.2, 15.0));
+          float fault = 1.0 - smoothstep(0.35, 1.5, d);
+          float broken = step(0.9, hash12(floor(hi.yz * 3.0 + 0.5)));
+          return edge * clamp(max(fault, broken * 0.6), 0.0, 1.0);
         }
       `,
       color: /* glsl */ `
@@ -184,7 +195,7 @@ export const OBSIDIAN_CALDERA: WorldTheme = {
   id: 'caldera',
   name: 'Obsidian Caldera',
   exposure: 1.1,
-  bloom: { strength: 0.9, threshold: 0.7, radius: 0.7 },
+  bloom: { strength: 0.85, threshold: 0.9, radius: 0.7 },
   fog: { color: '#3a1610', near: 55, far: 260 },
   sun: { color: '#ffb08a', intensity: 1.7, dir: [-0.35, 0.9, 0.25] },
   hemi: { sky: '#4a2c30', ground: '#ff6a2a', intensity: 1.15 },
@@ -263,6 +274,7 @@ export const OBSIDIAN_CALDERA: WorldTheme = {
       }
       const core = new Mesh(new BoxGeometry(1.2, 1.2, 1.2), lavaGlow)
       core.position.set(p.cx, h + 2.4, p.cz)
+      core.userData.dynamic = true
       group.add(core)
       embersAbove.push({ mesh: core, baseY: core.position.y, phase: p.cx })
     }
