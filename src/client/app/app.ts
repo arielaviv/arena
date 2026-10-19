@@ -331,6 +331,7 @@ export class App {
     this.audio.play(win ? 'victory' : 'defeat')
     this.results.showResult(win, snap.fighters, myTeam, s.myId)
     this.results.setVisible(true)
+    this.hud.setVisible(false)
     this.state = 'results'
     this.input.unlock()
     this.pause.setVisible(false)

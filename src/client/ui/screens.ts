@@ -146,7 +146,7 @@ export class ResultsScreen {
     for (const f of sorted) {
       const c = CLASSES[f.cls]
       const me = f.id === myId
-      html += `<div class="flex items-center gap-2 font-semibold ${f.team === myTeam ? 'text-sky-200' : 'text-rose-200'}"><span class="inline-block h-2 w-2 rounded-full" style="background:${c.colors.primary}"></span>${f.name}${me ? ' (you)' : ''}</div>`
+      html += `<div class="flex items-center gap-2 font-semibold ${f.team === myTeam ? 'text-sky-200' : 'text-rose-200'}"><span class="inline-block h-2 w-2 rounded-full" style="background:${c.colors.primary}"></span>${f.name}${me && f.name !== 'You' ? ' (you)' : ''}</div>`
       html += `<div class="text-right tabular-nums">${Math.round(f.damage)}</div><div class="text-right tabular-nums">${Math.round(f.healing)}</div><div class="text-right tabular-nums">${f.interrupts}</div><div class="text-right tabular-nums">${f.ccDone}</div>`
     }
     this.table.innerHTML = html

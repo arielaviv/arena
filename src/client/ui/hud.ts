@@ -280,7 +280,7 @@ export class Hud {
     } else if (view.mode === 'arena' && view.phase === 'live' && view.phaseTimer < 1.1) {
       setText(this.banner, 'FIGHT')
       setText(this.subBanner, '')
-    } else if (view.phase !== 'ended') {
+    } else {
       setText(this.banner, '')
       setText(this.subBanner, '')
     }
