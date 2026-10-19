@@ -39,6 +39,7 @@ export class App {
   private theme: ThemeId = 'sky'
   private pickMode: 'arena' | 'training' = 'arena'
   private endTimer = 0
+  private unlockedFor = 0
   private resultShown = false
   private readonly lag: { lagMs: number; jitterMs: number }
   private readonly perf: PerfMonitor
@@ -286,6 +287,14 @@ export class App {
   frame(dt: number): void {
     this.perf.frame(dt)
     this.matchFound.update(dt, this.session?.ready ?? true)
+    // Browsers refuse pointer lock without a click (e.g. auto next match):
+    // surface the RESUME button instead of leaving the player stuck.
+    if (this.state === 'match' && !this.input.locked && !this.matchFound.visible) {
+      this.unlockedFor += dt
+      if (this.unlockedFor > 0.6) this.pause.setVisible(true)
+    } else {
+      this.unlockedFor = 0
+    }
     const s = this.session
     if (s) {
       s.update(dt)
