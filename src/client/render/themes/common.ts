@@ -4,12 +4,17 @@ import {
   BoxGeometry,
   BufferAttribute,
   BufferGeometry,
+  CircleGeometry,
   Color,
   type ColorRepresentation,
+  ConeGeometry,
   CylinderGeometry,
+  DoubleSide,
   type Group,
   type Material,
   Mesh,
+  MeshToonMaterial,
+  PlaneGeometry,
   Points,
   ShaderMaterial,
   SphereGeometry,
@@ -236,4 +241,56 @@ export function gateMaterial(color: ColorRepresentation): ShaderMaterial {
 
 export function columnGeometry(radius: number, height: number, sides = 10): CylinderGeometry {
   return new CylinderGeometry(radius, radius, height, sides)
+}
+
+// Team banners and gate braziers for both start rooms (first thing a player
+// sees after MATCH FOUND).
+export function dressStartRooms(
+  group: Group,
+  geo: WorldGeometry,
+  trim: Material,
+  stone: Material,
+  flame: Material,
+): void {
+  if (geo.id !== 'arena') return
+  const teamColor = ['#2b7fd8', '#d63a4f']
+  for (const team of [0, 1] as const) {
+    const s = team === 0 ? -1 : 1
+    const backX = s * 44.0
+    const cloth = new MeshToonClothMaterial(teamColor[team] ?? '#888')
+    for (const z of [-3.2, 0, 3.2]) {
+      const banner = new Mesh(new PlaneGeometry(1.5, 3.6), cloth)
+      banner.position.set(backX - s * 0.05, 4.1, z)
+      banner.rotation.y = s > 0 ? -Math.PI / 2 : Math.PI / 2
+      group.add(banner)
+      const rod = new Mesh(new BoxGeometry(0.1, 0.1, 1.8), trim)
+      rod.position.set(backX - s * 0.08, 5.95, z)
+      group.add(rod)
+      const emblem = new Mesh(new CircleGeometry(0.42, 24), trim)
+      emblem.position.set(backX - s * 0.07, 4.5, z)
+      emblem.rotation.y = banner.rotation.y
+      group.add(emblem)
+    }
+    // braziers either side of the gate, inside the room
+    for (const z of [-5.5, 5.5]) {
+      const x = s * 39.6
+      const base = new Mesh(new CylinderGeometry(0.35, 0.5, 1.1, 8), stone)
+      base.position.set(x, 1.5 + 0.55, z)
+      base.castShadow = true
+      group.add(base)
+      const bowl = new Mesh(new CylinderGeometry(0.6, 0.35, 0.4, 10), trim)
+      bowl.position.set(x, 1.5 + 1.3, z)
+      group.add(bowl)
+      const fire = new Mesh(new ConeGeometry(0.45, 1.3, 12, 1, true), flame)
+      fire.position.set(x, 1.5 + 2.1, z)
+      fire.userData.dynamic = true
+      group.add(fire)
+    }
+  }
+}
+
+class MeshToonClothMaterial extends MeshToonMaterial {
+  constructor(color: string) {
+    super({ color, side: DoubleSide })
+  }
 }

@@ -15,10 +15,12 @@ import {
 } from 'three'
 import type { WorldGeometry } from '../../../shared/sim/geometry'
 import { ARENA } from '../../../shared/sim/layout'
+import { flameMaterial } from '../fx/materials'
 import { NOISE_GLSL, patchMaterial } from '../shaderlib'
 import { toon, withOutline } from '../toon'
 import {
   boxAt,
+  dressStartRooms,
   driftParticles,
   flatMesh,
   gateMaterial,
@@ -304,6 +306,8 @@ export const OBSIDIAN_CALDERA: WorldTheme = {
         group.add(post)
       }
     }
+
+    dressStartRooms(group, geo, basaltLight, obsidian, flameMaterial('#ffcf5a', '#d93a06'))
 
     const embers = driftParticles(arena ? 520 : 260, arena ? 36 : 28, 18, '#ff8a3a', 2.4, 1.6, true)
     group.add(embers.points)

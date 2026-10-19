@@ -20,10 +20,12 @@ import {
 } from 'three'
 import type { WorldGeometry } from '../../../shared/sim/geometry'
 import { ARENA } from '../../../shared/sim/layout'
+import { flameMaterial } from '../fx/materials'
 import { NOISE_GLSL, patchMaterial } from '../shaderlib'
 import { toon, withOutline } from '../toon'
 import {
   boxAt,
+  dressStartRooms,
   driftParticles,
   flatMesh,
   gateMaterial,
@@ -444,6 +446,8 @@ export const SKY_SANCTUM: WorldTheme = {
       }
       group.add(boxAt(1.0, 0.9, p.hz * 2 + 1.6, p.cx, ARENA.roomY + 5.6, 0, 0, gold))
     }
+
+    dressStartRooms(group, geo, gold, marbleDark, flameMaterial('#ffcf5a', '#d93a06'))
 
     // Waterfalls pouring off the edge
     const fallMat = waterfallMaterial()
