@@ -22,7 +22,7 @@ export const SHARED_AURAS: readonly AuraDef[] = [
     color: '#a3e635',
     glyph: 'poison',
     maxStacks: 5,
-    tick: { interval: 1, damage: 6, perStack: true },
+    tick: { interval: 1, damage: 5, perStack: true },
   },
   {
     id: 'badly-poisoned',
@@ -52,7 +52,7 @@ export const SHARED_AURAS: readonly AuraDef[] = [
     dispel: 'physical',
     color: '#dc2626',
     glyph: 'bleed',
-    tick: { interval: 1, damage: 13, movingMult: 2 },
+    tick: { interval: 1, damage: 10, movingMult: 2 },
   },
   {
     id: 'paralysis',

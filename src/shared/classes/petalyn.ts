@@ -36,7 +36,7 @@ export const PETALYN: ClassDef = {
   maxHp: 1100,
   resource: 'mana',
   maxResource: 100,
-  regen: 4.5,
+  regen: 2,
   colors: { primary: '#4ade80', secondary: '#0b2a14', glow: '#ffc2e2' },
   abilities: {
     lmb: {
@@ -50,7 +50,7 @@ export const PETALYN: ClassDef = {
       target: { kind: 'projectile', speed: 45, radius: 0.3, range: 36, side: 'both' },
       effects: [
         { kind: 'damage', amount: 26 },
-        { kind: 'heal', amount: 34 },
+        { kind: 'heal', amount: 18 },
       ],
       tags: ['primary', 'heal'],
       vfx: 'pollen-puff',
@@ -62,11 +62,11 @@ export const PETALYN: ClassDef = {
       slot: 'rmb',
       element: 'grass',
       school: 'spell',
-      cost: 15,
+      cost: 22,
       cooldown: 0,
       castTime: 1.4,
       target: { kind: 'targeted', range: 40, side: 'ally' },
-      effects: [{ kind: 'heal', amount: 280 }],
+      effects: [{ kind: 'heal', amount: 270 }],
       tags: ['heal'],
       vfx: 'floral-healing',
       blurb: 'Big heal on an ally',
@@ -145,7 +145,7 @@ export const PETALYN: ClassDef = {
       cooldown: 1,
       target: { kind: 'nova', radius: 30, side: 'ally' },
       effects: [
-        { kind: 'heal', amount: 300 },
+        { kind: 'heal', amount: 220 },
         { kind: 'cleanse', count: 2, dispel: ['magic', 'poison'] },
       ],
       tags: ['ult', 'heal', 'dispel'],

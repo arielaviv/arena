@@ -22,7 +22,7 @@ export const VENOMAW: ClassDef = {
   element: 'poison',
   role: 'dps',
   archetype: 'Assassin',
-  maxHp: 1250,
+  maxHp: 1100,
   resource: 'energy',
   maxResource: 100,
   regen: 16,
@@ -39,14 +39,14 @@ export const VENOMAW: ClassDef = {
       cooldown: 0.45,
       target: { kind: 'melee', range: 3.6, angle: 1.8 },
       effects: [
-        { kind: 'damage', amount: 40 },
+        { kind: 'damage', amount: 24 },
         { kind: 'aura', aura: 'poison' },
       ],
       combo: {
         steps: 3,
         window: 1.2,
         finisher: [
-          { kind: 'damage', amount: 30 },
+          { kind: 'damage', amount: 20 },
           { kind: 'aura', aura: 'poison' },
         ],
       },
@@ -64,7 +64,7 @@ export const VENOMAW: ClassDef = {
       cooldown: 6,
       target: { kind: 'melee', range: 4, angle: 1.6 },
       effects: [
-        { kind: 'damage', amount: 140 },
+        { kind: 'damage', amount: 100 },
         { kind: 'aura', aura: 'bleed' },
       ],
       tags: ['nuke', 'dot'],

@@ -21,7 +21,7 @@ export const TIDEHORN_AURAS: readonly AuraDef[] = [
     dispel: 'magic',
     color: '#22d3ee',
     glyph: 'hot',
-    tick: { interval: 1, heal: 30 },
+    tick: { interval: 1, heal: 36 },
     damageTaken: 0.8,
   },
 ]
@@ -35,7 +35,7 @@ export const TIDEHORN: ClassDef = {
   maxHp: 1150,
   resource: 'mana',
   maxResource: 100,
-  regen: 4.5,
+  regen: 2,
   colors: { primary: '#1fb6ff', secondary: '#062a3b', glow: '#7ae7ff' },
   abilities: {
     lmb: {
@@ -58,11 +58,11 @@ export const TIDEHORN: ClassDef = {
       slot: 'rmb',
       element: 'water',
       school: 'spell',
-      cost: 16,
+      cost: 22,
       cooldown: 0,
       castTime: 1.6,
       target: { kind: 'targeted', range: 40, side: 'ally' },
-      effects: [{ kind: 'heal', amount: 320 }],
+      effects: [{ kind: 'heal', amount: 300 }],
       tags: ['heal'],
       vfx: 'life-dew',
       blurb: 'Big heal on an ally',
