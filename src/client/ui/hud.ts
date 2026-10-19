@@ -57,6 +57,7 @@ export class Hud {
   private errorTimer = 0
   private readonly banner: HTMLDivElement
   private readonly vs: HTMLDivElement
+  private readonly spectate: HTMLDivElement
   private vsKey = ''
   private readonly subBanner: HTMLDivElement
   private readonly party: PartyFrame[] = []
@@ -108,6 +109,12 @@ export class Hud {
     )
 
     this.vs = el('div', 'absolute left-1/2 top-[11%] flex -translate-x-1/2 items-center gap-6', this.root)
+    this.spectate = el(
+      'div',
+      'absolute left-1/2 top-[19%] -translate-x-1/2 rounded-full bg-zinc-950/70 px-4 py-1 text-sm font-semibold text-zinc-200',
+      this.root,
+    )
+    show(this.spectate, false)
     const bannerWrap = el('div', 'absolute left-1/2 top-[24%] -translate-x-1/2 text-center', this.root)
     this.banner = el('div', 'banner text-7xl text-zinc-50', bannerWrap)
     this.subBanner = el(
@@ -167,6 +174,11 @@ export class Hud {
 
   setVisible(v: boolean): void {
     show(this.root, v)
+  }
+
+  setSpectating(name: string | null): void {
+    show(this.spectate, name !== null)
+    if (name) setText(this.spectate, `Spectating ${name}`)
   }
 
   setKeyLabels(labels: Record<Slot, string>): void {
@@ -238,6 +250,7 @@ export class Hud {
     })
     setStyle(this.ult, 'transform', `scaleX(${(me.ult / 100).toFixed(3)})`)
     setStyle(this.ult, 'background', me.ult >= 100 ? '#fde047' : '#a16207')
+    this.slots.get('r')?.root.classList.toggle('ult-ready', me.ult >= 100 && me.alive)
 
     setBar(this.myHp, me.hp / me.maxHp, `${Math.round(me.hp)} / ${me.maxHp}`)
     setBar(this.myRes, me.res / me.maxRes)

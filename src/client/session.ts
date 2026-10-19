@@ -55,6 +55,7 @@ export class Session {
   private readonly renderPos = new Vector3()
   onEvent: ((e: SimEvent) => void) | null = null
   ready = false
+  spectating: string | null = null
   private firstSnap: (() => void) | null = null
   // Dev/test only: overrides keyboard and mouse so headless runs can play.
   debugInput: { moveX?: number; moveZ?: number; buttons?: number } | null = null
@@ -379,14 +380,21 @@ export class Session {
     this.vfx.update(dt, this.serverClock, views)
     this.view.update(dt, this.time)
 
-    // Camera
+    // Camera: follow yourself, or spectate a living teammate once you're down.
+    const spectate =
+      me && !me.alive && snap.mode === 'arena'
+        ? views.find(
+            (v) => v.alive && v.id !== me.id && snap.fighters.find((f) => f.id === v.id)?.team === me.team,
+          )
+        : undefined
+    this.spectating = spectate ? (snap.fighters.find((f) => f.id === spectate.id)?.name ?? null) : null
     if (pf) {
       const speedH = Math.hypot(pf.vel.x, pf.vel.z)
       this.cam.update(
         dt,
-        this.renderPos.x,
-        this.renderPos.y,
-        this.renderPos.z,
+        spectate ? spectate.x : this.renderPos.x,
+        spectate ? spectate.y : this.renderPos.y,
+        spectate ? spectate.z : this.renderPos.z,
         this.input.yaw,
         this.input.pitch,
         pf.move === 'slide',
@@ -424,6 +432,7 @@ export class Session {
         hasLos: (a, b) => this.world.lineOfSight(a.x, a.y + 1.5, a.z, b.x, b.y + 1.1, b.z),
       }
       this.hud.update(view, dt)
+      this.hud.setSpectating(this.spectating)
     }
   }
 
