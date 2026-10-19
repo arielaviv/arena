@@ -1,5 +1,7 @@
 import {
   AdditiveBlending,
+  type AnimationAction,
+  AnimationMixer,
   BoxGeometry,
   type BufferGeometry,
   CapsuleGeometry,
@@ -7,6 +9,8 @@ import {
   ConeGeometry,
   CylinderGeometry,
   Group,
+  LoopOnce,
+  LoopRepeat,
   type Material,
   Mesh,
   MeshBasicMaterial,
@@ -18,6 +22,7 @@ import {
 import { CLASSES } from '../../shared/combat/registry'
 import type { ClassId } from '../../shared/combat/types'
 import type { MoveState } from '../../shared/sim/fighter'
+import { type ModelInstance, models } from './models'
 import { toon, withOutline } from './toon'
 
 export interface AvatarState {
@@ -258,9 +263,29 @@ function buildCreature(id: ClassId): Rig {
   return rig
 }
 
+type Trigger = 'attack' | 'cast' | 'hit' | 'emote'
+
+interface ModelRig {
+  inst: ModelInstance
+  mixer: AnimationMixer
+  actions: Map<string, AnimationAction>
+  base: string
+  oneShot: AnimationAction | null
+  dead: boolean
+}
+
+const TRIGGER_CLIP: Record<Trigger, string> = {
+  attack: 'Punch',
+  cast: 'Weapon',
+  hit: 'HitReact',
+  emote: 'Yes',
+}
+
 export class Avatar {
   readonly root = new Group()
-  private rig: Rig
+  private rig: Rig | null = null
+  private model: ModelRig | null = null
+  private body: Group = new Group()
   private classId: ClassId
   private phase = 0
   private flash = 0
@@ -275,8 +300,6 @@ export class Avatar {
     private readonly isLocal = false,
   ) {
     this.classId = classId
-    this.rig = buildCreature(classId)
-    this.root.add(this.rig.body)
     const ally = team === localTeam
     this.ring = new Mesh(
       new RingGeometry(0.55, 0.68, 32),
@@ -291,35 +314,151 @@ export class Avatar {
     this.ring.rotation.x = -Math.PI / 2
     this.ring.position.y = 0.04
     this.root.add(this.ring)
+    this.build()
+  }
+
+  get usesModel(): boolean {
+    return this.model !== null
+  }
+
+  private build(): void {
+    this.root.remove(this.body)
+    this.model?.mixer.stopAllAction()
+    this.model = null
+    this.rig = null
+    const inst = this.classId !== 'dummy' ? models.instance(this.classId) : null
+    if (inst) {
+      const mixer = new AnimationMixer(inst.root)
+      const actions = new Map<string, AnimationAction>()
+      for (const clip of inst.clips) actions.set(clip.name, mixer.clipAction(clip))
+      const body = new Group()
+      body.add(inst.root)
+      this.body = body
+      this.model = { inst, mixer, actions, base: '', oneShot: null, dead: false }
+      this.setBase('Idle', 0)
+    } else {
+      this.rig = buildCreature(this.classId)
+      this.body = this.rig.body
+    }
+    this.root.add(this.body)
     this.collectFlash()
   }
 
   private collectFlash(): void {
     this.flashMats.length = 0
-    this.rig.body.traverse((o) => {
+    if (this.model) {
+      this.flashMats.push(...this.model.inst.materials)
+      return
+    }
+    const glow = this.rig?.glow ?? []
+    this.body.traverse((o) => {
       const m = (o as Mesh).material as MeshToonMaterial | undefined
-      if (m && 'isMeshToonMaterial' in m && !this.rig.glow.includes(m) && !this.flashMats.includes(m))
+      if (m && 'isMeshToonMaterial' in m && !glow.includes(m) && !this.flashMats.includes(m))
         this.flashMats.push(m)
     })
   }
 
   setClass(classId: ClassId): void {
     if (classId === this.classId) return
-    this.root.remove(this.rig.body)
     this.classId = classId
-    this.rig = buildCreature(classId)
-    this.root.add(this.rig.body)
-    this.collectFlash()
+    this.build()
+  }
+
+  // Swap the placeholder for the real model once it has loaded.
+  refreshModel(): void {
+    if (!this.model && this.classId !== 'dummy' && models.has(this.classId)) this.build()
   }
 
   hit(): void {
     this.flash = 1
   }
 
+  trigger(kind: Trigger): void {
+    const m = this.model
+    if (!m || m.dead) return
+    const action = m.actions.get(TRIGGER_CLIP[kind])
+    if (!action) return
+    if (m.oneShot && m.oneShot !== action) m.oneShot.fadeOut(0.08)
+    action.reset()
+    const loop = kind === 'emote'
+    action.setLoop(loop ? LoopRepeat : LoopOnce, loop ? Number.POSITIVE_INFINITY : 1)
+    action.clampWhenFinished = false
+    action.timeScale = kind === 'attack' ? 1.6 : kind === 'cast' ? 1.4 : 1.2
+    action.setEffectiveWeight(1)
+    action.fadeIn(0.06).play()
+    m.oneShot = action
+  }
+
+  private setBase(name: string, fade: number): void {
+    const m = this.model
+    if (!m || m.base === name) return
+    const next = m.actions.get(name)
+    if (!next) return
+    const prev = m.actions.get(m.base)
+    next.reset()
+    next.setLoop(LoopRepeat, Number.POSITIVE_INFINITY)
+    next.play()
+    if (prev && fade > 0) next.crossFadeFrom(prev, fade, false)
+    else if (prev) prev.stop()
+    m.base = name
+  }
+
+  private updateModel(dt: number, s: AvatarState, time: number): void {
+    const m = this.model
+    if (!m) return
+    if (!s.alive) {
+      if (!m.dead) {
+        m.dead = true
+        const death = m.actions.get('Death')
+        if (death) {
+          m.mixer.stopAllAction()
+          death.reset()
+          death.setLoop(LoopOnce, 1)
+          death.clampWhenFinished = true
+          death.play()
+        }
+      }
+      m.mixer.update(dt)
+      return
+    }
+    if (m.dead) {
+      m.dead = false
+      m.mixer.stopAllAction()
+      m.base = ''
+    }
+    let base = 'Idle'
+    if (s.move === 'slide') base = 'Duck'
+    else if (s.move === 'air') base = 'Jump_Idle'
+    else if (s.move === 'dash') base = 'Run'
+    else if (s.speed > 4) base = 'Run'
+    else if (s.speed > 0.6) base = 'Walk'
+    else if (s.casting || s.channel) base = 'Wave'
+    this.setBase(base, 0.15)
+    const baseAction = m.actions.get(m.base)
+    if (baseAction) {
+      if (m.base === 'Run') baseAction.timeScale = Math.max(0.8, s.speed / 7.5)
+      else if (m.base === 'Walk') baseAction.timeScale = Math.max(0.6, s.speed / 2.5)
+      else baseAction.timeScale = 1
+    }
+    if (m.oneShot && !m.oneShot.isRunning()) m.oneShot = null
+    m.mixer.update(s.stunned ? dt * 0.05 : s.asleep ? dt * 0.3 : dt)
+    this.body.rotation.x = s.stunned ? Math.sin(time * 18) * 0.04 : 0
+    this.body.rotation.z = s.asleep ? -0.25 : 0
+    this.body.position.y = this.classId === 'lumora' ? 0.12 + Math.sin(time * 2) * 0.05 : 0
+  }
+
   update(dt: number, s: AvatarState, time: number): void {
     this.root.position.set(s.x, s.y, s.z)
     this.root.rotation.y = -s.yaw
+    this.flash = Math.max(0, this.flash - dt * 6)
+    for (const mat of this.flashMats) mat.emissive.setRGB(this.flash, this.flash, this.flash)
+    this.ring.visible = s.alive && !this.isLocal
+    if (this.model) {
+      this.updateModel(dt, s, time)
+      return
+    }
     const r = this.rig
+    if (!r) return
     const moving = s.speed > 0.6 && s.move !== 'slide'
     this.phase += dt * (moving ? 3 + s.speed * 0.9 : 1.5)
 
@@ -338,7 +477,6 @@ export class Avatar {
       r.tail.rotation.y = Math.sin(time * 3 + this.phase * 0.5) * (this.classId === 'venomaw' ? 0.15 : 0.35)
     if (r.head) r.head.rotation.z = s.asleep ? -0.5 : moving ? Math.sin(this.phase * 2) * 0.05 : 0
 
-    // lean into movement, crouch when sliding
     const lean = s.move === 'slide' ? 0.55 : moving ? Math.min(0.25, s.speed * 0.02) : 0
     r.body.rotation.z += -lean * (s.alive ? 1 : 0)
     const bob = moving ? Math.abs(Math.sin(this.phase)) * 0.06 : Math.sin(time * 1.8) * 0.015
@@ -351,19 +489,16 @@ export class Avatar {
       r.flame.scale.set(k, k * 1.2, k)
     }
     const glowPulse = castUp ? 3.5 + Math.sin(time * 14) * 1.2 : 2.2
-    for (const m of r.glow) (m as MeshToonMaterial).emissiveIntensity = glowPulse
-
-    this.flash = Math.max(0, this.flash - dt * 6)
-    for (const m of this.flashMats) {
-      m.emissive.setRGB(this.flash, this.flash, this.flash)
-    }
-    this.ring.visible = s.alive && !this.isLocal
+    for (const mat of r.glow) (mat as MeshToonMaterial).emissiveIntensity = glowPulse
   }
 
   dispose(): void {
-    this.root.traverse((o) => {
-      const mesh = o as Mesh
-      mesh.geometry?.dispose()
-    })
+    this.model?.mixer.stopAllAction()
+    if (this.rig) {
+      this.root.traverse((o) => {
+        const mesh = o as Mesh
+        mesh.geometry?.dispose()
+      })
+    }
   }
 }

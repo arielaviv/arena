@@ -4,6 +4,7 @@ import { buildArena } from '../../shared/sim/layout'
 import { Audio } from '../core/audio'
 import { Input } from '../core/input'
 import { type Quality, Renderer } from '../core/renderer'
+import { models } from '../render/models'
 import { renderThumbnails } from '../render/thumbs'
 import { type ThemeId, WorldView } from '../render/world'
 import { Session } from '../session'
@@ -91,8 +92,9 @@ export class App {
     this.input.onKey = (code) => this.onKey(code)
 
     this.showMenu()
-    // Creature thumbnails for the class cards, rendered after first paint.
-    requestAnimationFrame(() => {
+    // Creature models stream in behind the title; thumbnails follow them.
+    models.onLoaded = () => this.session?.refreshModels()
+    void models.loadAll().then(() => {
       const thumbs = renderThumbnails()
       for (const [id, url] of thumbs) this.pick.setThumb(id, url)
     })

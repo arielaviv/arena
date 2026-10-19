@@ -94,6 +94,10 @@ export class Session {
     return this.latest?.fighters.find((f) => f.id === this.opts.myId) ?? null
   }
 
+  refreshModels(): void {
+    for (const av of this.avatars.values()) av.refreshModel()
+  }
+
   sendTraining(cmd: TrainingCommand): void {
     this.transport.send({ type: 'training', cmd })
   }
@@ -151,15 +155,21 @@ export class Session {
     switch (e.t) {
       case 'damage':
         this.avatars.get(e.dst)?.hit()
+        if (!e.tick && e.amount >= 60) this.avatars.get(e.dst)?.trigger('hit')
         if (e.dst === me && !e.tick) this.cam.addShake(Math.min(0.5, e.amount / 260))
         if (e.src === me && !e.tick)
           this.audio.play(e.amount >= 150 ? 'hit-big' : 'hit', e.amount >= 150 ? 1 : 0.7)
         if (e.src === me && e.amount >= 150) this.cam.kickFov(3)
         break
       case 'use': {
-        if (e.src !== me) break
         const a = getAbility(e.ability)
         if (!a) break
+        const kind = a.target.kind
+        if (kind !== 'beam') {
+          const melee = kind === 'melee' || kind === 'cone' || kind === 'dash'
+          this.avatars.get(e.src)?.trigger(melee ? 'attack' : 'cast')
+        }
+        if (e.src !== me) break
         if (a.target.kind === 'dash') this.audio.play('dash')
         else if (a.slot === 'lmb') this.audio.play(`shoot-${a.element}`, 0.8, 0.05)
         else this.audio.play('cast-done', 0.7)
@@ -191,6 +201,12 @@ export class Session {
         break
       case 'phase':
         if (e.phase === 'live') this.audio.play('fight')
+        if (e.phase === 'ended') {
+          const winner = this.latest?.winner
+          for (const f of this.latest?.fighters ?? []) {
+            if (f.team === winner && f.alive) this.avatars.get(f.id)?.trigger('emote')
+          }
+        }
         break
       default:
         break

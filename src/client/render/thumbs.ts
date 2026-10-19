@@ -38,7 +38,7 @@ export function renderThumbnails(size = 360): Map<ClassId, string> {
         x: 0,
         y: 0,
         z: 0,
-        yaw: -0.9,
+        yaw: 0.75,
         speed: 0,
         move: 'idle',
         casting: false,
@@ -48,6 +48,23 @@ export function renderThumbnails(size = 360): Map<ClassId, string> {
         asleep: false,
       },
       0.5,
+    )
+    av.update(
+      0.35,
+      {
+        x: 0,
+        y: 0,
+        z: 0,
+        yaw: 0.75,
+        speed: 0,
+        move: 'idle',
+        casting: false,
+        channel: false,
+        alive: true,
+        stunned: false,
+        asleep: false,
+      },
+      0.85,
     )
     av.root.children.forEach((c) => {
       if (c.type === 'Mesh') c.visible = false
