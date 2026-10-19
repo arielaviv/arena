@@ -57,6 +57,7 @@ export class MatchSim implements CombatHost {
   private dummyBrains = new Map<number, DummyBrain>()
   private aims = new Map<number, Aim>()
   private respawn = new Map<number, number>()
+  private inputQueues = new Map<number, InputCmd[]>()
 
   constructor(cfg: MatchConfig) {
     this.mode = cfg.mode
@@ -126,11 +127,19 @@ export class MatchSim implements CombatHost {
     return this.aims.get(id)
   }
 
+  // Human inputs are queued and consumed one per tick, so bursts from a
+  // jittery connection never drop a command (or a quick key tap).
   setInput(id: number, cmd: InputCmd): void {
     const f = this.byId(id)
     if (f?.control !== 'human') return
-    if (cmd.seq <= f.input.seq && cmd.seq !== 0) return
-    f.input = cmd
+    let q = this.inputQueues.get(id)
+    if (!q) {
+      q = []
+      this.inputQueues.set(id, q)
+    }
+    const last = q.length > 0 ? (q[q.length - 1]?.seq ?? 0) : f.input.seq
+    if (cmd.seq <= last && cmd.seq !== 0) return
+    q.push(cmd)
   }
 
   drainEvents(): SimEvent[] {
@@ -144,6 +153,13 @@ export class MatchSim implements CombatHost {
     this.updatePhase()
 
     for (const f of this.fighters) {
+      const q = this.inputQueues.get(f.id)
+      if (q && q.length > 0) {
+        // Fell behind (clock drift or a burst): skip ahead but keep it short.
+        while (q.length > 10) q.shift()
+        const next = q.shift()
+        if (next) f.input = next
+      }
       const brain = this.brains.get(f.id)
       if (brain) f.input = brain.think(this, f, DT)
       const dummy = this.dummyBrains.get(f.id)
