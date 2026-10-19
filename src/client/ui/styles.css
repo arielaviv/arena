@@ -330,3 +330,32 @@ body {
       0 0 22px rgba(253, 224, 71, 0.65);
   }
 }
+
+/* Film grain over the title (SVG noise, animated by shifting the tile). */
+.title-grain {
+  opacity: 0.11;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 0.9s steps(6) infinite;
+}
+
+@keyframes grain {
+  0% {
+    background-position: 0 0;
+  }
+  20% {
+    background-position: -40px 25px;
+  }
+  40% {
+    background-position: 30px -50px;
+  }
+  60% {
+    background-position: -60px -20px;
+  }
+  80% {
+    background-position: 50px 40px;
+  }
+  100% {
+    background-position: 0 0;
+  }
+}

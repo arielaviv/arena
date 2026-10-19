@@ -14,8 +14,12 @@ export class TitleScreen {
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'absolute inset-0 flex flex-col items-center justify-center', parent)
-    el('div', 'pointer-events-none absolute inset-0', this.root).style.background =
-      'radial-gradient(ellipse at 50% 55%, rgba(12,12,15,0) 30%, rgba(12,12,15,0.55) 100%)'
+    const shade = el('div', 'pointer-events-none absolute inset-0', this.root)
+    shade.style.background = [
+      'linear-gradient(180deg, rgba(12,12,15,0.55) 0%, rgba(12,12,15,0) 38%, rgba(12,12,15,0) 62%, rgba(12,12,15,0.7) 100%)',
+      'radial-gradient(ellipse at 50% 50%, rgba(12,12,15,0) 35%, rgba(12,12,15,0.6) 100%)',
+    ].join(',')
+    el('div', 'title-grain pointer-events-none absolute inset-0', this.root)
     const word = el('h1', 'banner relative leading-[0.82] text-zinc-50', this.root, 'ARENA')
     word.style.fontSize = 'clamp(96px, 21vw, 340px)'
     word.style.textShadow = '0 12px 60px rgba(0,0,0,0.45)'
