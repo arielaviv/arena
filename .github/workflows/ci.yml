@@ -22,5 +22,6 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm biome ci .
       - run: pnpm tsc --noEmit
+      - run: pnpm tsc --noEmit -p src/server/tsconfig.json
       - run: pnpm vitest run --passWithNoTests
       - run: pnpm vite build
