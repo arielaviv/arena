@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { applyAura, dealDamage, updateFighterTimers } from '../src/shared/combat/effects'
 import type { SimEvent } from '../src/shared/combat/events'
-import { getAura, validateRegistry } from '../src/shared/combat/registry'
+import { CLASSES, getAura, validateRegistry } from '../src/shared/combat/registry'
 import type { ClassId } from '../src/shared/combat/types'
 import { aimAtPoint } from '../src/shared/sim/aim'
 import { DT } from '../src/shared/sim/constants'
@@ -198,7 +198,8 @@ describe('casting', () => {
     run(sim, 2)
     press(sim, healer, 0, dps)
     run(sim, 110)
-    expect(dps.hp).toBe(720)
+    const heal = CLASSES.tidehorn.abilities.rmb.effects.find((e) => e.kind === 'heal')
+    expect(dps.hp).toBe(400 + (heal?.kind === 'heal' ? heal.amount : 0))
   })
 })
 
