@@ -336,7 +336,7 @@ export class Vfx {
             if (!src) return
             const big = a.slot === 'rmb'
             if (t.kind === 'melee') {
-              const tilt = (Math.random() - 0.5) * 0.9
+              const tilt = (Math.random() < 0.5 ? -1 : 1) * (0.65 + Math.random() * 0.4)
               fx.slash(
                 src.x,
                 src.y + 1.05,

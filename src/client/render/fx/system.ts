@@ -338,7 +338,7 @@ export class FxSystem {
     color: string,
     life = 0.45,
   ): void {
-    const mat = shieldMaterial(color, false)
+    const mat = beamMaterial('#e0f7ff', color, 4)
     const geo = new PlaneGeometry(width, 1.6, 12, 1)
     const pos = geo.attributes.position
     if (pos) {

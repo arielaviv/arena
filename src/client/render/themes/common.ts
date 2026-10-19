@@ -130,7 +130,7 @@ export function skyDome(
         col = mix(col, uTop, smoothstep(0.25, 0.9, h));
         float s = max(dot(normalize(vDir), uSunDir), 0.0);
         col += uSun * (pow(s, 8.0) * 0.35 + pow(s, 64.0) * 0.6);
-        col += uSun * smoothstep(1.0 - uSunSize, 1.0 - uSunSize * 0.6, s) * 2.5;
+        col += uSun * smoothstep(1.0 - uSunSize, 1.0 - uSunSize * 0.6, s) * 1.3;
         gl_FragColor = vec4(col, 1.0);
       }
     `,

@@ -248,7 +248,7 @@ export const SKY_SANCTUM: WorldTheme = {
     const floorMat = floorMaterial(occluders)
     const rockMat = rockMaterial()
 
-    group.add(skyDome('#38498f', '#d98a7a', '#ffc48a', SUN_DIR, '#fff0c8', 0.025))
+    group.add(skyDome('#38498f', '#d98a7a', '#ffc48a', SUN_DIR, '#fff0c8', 0.012))
     const clouds = cloudSea()
     group.add(clouds.mesh)
 
