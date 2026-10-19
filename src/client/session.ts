@@ -71,7 +71,12 @@ export class Session {
     this.predictor = new Predictor(this.world)
     const shadow = renderer.quality === 'high' ? 2048 : renderer.quality === 'medium' ? 1024 : 0
     this.view = new WorldView(renderer.scene, geo, opts.theme, shadow)
-    renderer.gl.toneMappingExposure = this.view.theme.exposure
+    const t = this.view.theme
+    renderer.setPost({
+      bloomStrength: t.bloom.strength,
+      bloomThreshold: t.bloom.threshold,
+      exposure: t.exposure,
+    })
     this.vfx = new Vfx(renderer.scene)
     this.cam = new CameraRig(renderer.camera)
     this.transport = new LocalTransport(opts.config, opts.myId, {

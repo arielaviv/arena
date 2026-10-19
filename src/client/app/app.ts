@@ -108,7 +108,12 @@ export class App {
       this.theme,
       this.renderer.quality === 'low' ? 0 : 1024,
     )
-    this.renderer.gl.toneMappingExposure = this.menu.theme.exposure
+    const t = this.menu.theme
+    this.renderer.setPost({
+      bloomStrength: t.bloom.strength,
+      bloomThreshold: t.bloom.threshold,
+      exposure: t.exposure,
+    })
     this.menu.setGates(true)
   }
 
@@ -247,7 +252,7 @@ export class App {
       }
       this.menu.update(dt, this.menuTime)
     }
-    this.renderer.render()
+    this.renderer.render(dt)
   }
 
   private showResults(): void {
