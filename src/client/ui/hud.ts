@@ -56,6 +56,8 @@ export class Hud {
   private readonly error: HTMLDivElement
   private errorTimer = 0
   private readonly banner: HTMLDivElement
+  private readonly vs: HTMLDivElement
+  private vsKey = ''
   private readonly subBanner: HTMLDivElement
   private readonly party: PartyFrame[] = []
   private readonly partyWrap: HTMLDivElement
@@ -105,6 +107,7 @@ export class Hud {
       this.root,
     )
 
+    this.vs = el('div', 'absolute left-1/2 top-[11%] flex -translate-x-1/2 items-center gap-6', this.root)
     const bannerWrap = el('div', 'absolute left-1/2 top-[24%] -translate-x-1/2 text-center', this.root)
     this.banner = el('div', 'banner text-7xl text-zinc-50', bannerWrap)
     this.subBanner = el(
@@ -268,6 +271,9 @@ export class Hud {
     this.target.update(target, me.team, dt)
 
     // Banners
+    const showVs = view.mode === 'arena' && view.phase === 'countdown'
+    show(this.vs, showVs)
+    if (showVs) this.renderVs(view)
     if (view.mode === 'arena' && view.phase === 'countdown') {
       setText(this.banner, String(Math.max(1, Math.ceil(view.phaseTimer))))
       setText(this.subBanner, 'Gates open in')
@@ -284,6 +290,25 @@ export class Hud {
 
     this.updateFloats(view, dt)
     this.updatePlates(view, dt)
+  }
+
+  // Your team vs theirs during the gate countdown.
+  private renderVs(view: HudView): void {
+    const me = view.me
+    if (!me) return
+    const key = view.fighters.map((f) => `${f.id}${f.cls}`).join(',')
+    if (key === this.vsKey) return
+    this.vsKey = key
+    const side = (team: 0 | 1) =>
+      view.fighters
+        .filter((f) => f.team === team && f.control !== 'dummy')
+        .map((f) => {
+          const c = CLASSES[f.cls]
+          return `<div class="flex flex-col items-center gap-1"><div class="grid h-12 w-12 place-items-center rounded-full border-2 ${team === me.team ? 'border-sky-400' : 'border-rose-400'}" style="background:radial-gradient(circle at 40% 35%, ${c.colors.glow}, ${c.colors.primary} 45%, ${c.colors.secondary})"><span class="font-display text-sm font-black text-white/90">${c.name[0] ?? ''}</span></div><div class="text-xs font-semibold text-zinc-100 drop-shadow">${f.name}</div><div class="text-[10px] font-bold uppercase tracking-widest ${c.role === 'healer' ? 'text-emerald-300' : 'text-rose-300'}">${c.name}</div></div>`
+        })
+        .join('')
+    const enemy: 0 | 1 = me.team === 0 ? 1 : 0
+    this.vs.innerHTML = `<div class="flex gap-4">${side(me.team)}</div><div class="banner text-4xl text-zinc-50">VS</div><div class="flex gap-4">${side(enemy)}</div>`
   }
 
   setBanner(text: string, sub: string): void {
