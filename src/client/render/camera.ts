@@ -12,7 +12,7 @@ export class CameraRig {
   private fovKick = 0
   private trauma = 0
   private shakeTime = 0
-  private pull = CAMERA.distance
+  private pull: number = CAMERA.distance
   readonly dir = new Vector3()
   readonly position = new Vector3()
   private readonly look = new Vector3()
@@ -49,7 +49,7 @@ export class CameraRig {
     const rz = Math.cos(yaw)
 
     // Pull in when a wall sits between the head and the camera.
-    let want = CAMERA.distance
+    let want: number = CAMERA.distance
     if (world) {
       const sx = x + rx * CAMERA.shoulder
       const sz = z + rz * CAMERA.shoulder
