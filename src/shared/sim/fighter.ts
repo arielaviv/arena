@@ -137,7 +137,7 @@ export function makeFighter(
     alive: true,
     cast: null,
     dash: null,
-    cooldowns: { lmb: 0, rmb: 0, q: 0, e: 0, f: 0, r: 0, c: 0 },
+    cooldowns: { lmb: 0, rmb: 0, q: 0, e: 0, f: 0, r: 0, c: 0, a1: 0, a2: 0, a3: 0 },
     gcd: 0,
     lockout: 0,
     comboStep: 0,
@@ -193,6 +193,14 @@ export function isIncapacitated(f: Fighter): boolean {
     if (cc === 'stun' || cc === 'sleep' || cc === 'confuse') return true
   }
   return false
+}
+
+export function isImmune(f: Fighter): boolean {
+  return f.auras.some((a) => a.def.immune)
+}
+
+export function isBlind(f: Fighter): boolean {
+  return f.auras.some((a) => a.def.blind)
 }
 
 export function findAura(f: Fighter, id: string): Aura | undefined {

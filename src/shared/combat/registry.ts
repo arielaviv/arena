@@ -37,7 +37,7 @@ for (const list of [
 
 const ABILITIES = new Map<string, AbilityDef>()
 for (const cls of Object.values(CLASSES)) {
-  for (const a of Object.values(cls.abilities)) ABILITIES.set(a.id, a)
+  for (const a of Object.values(cls.abilities)) if (a) ABILITIES.set(a.id, a)
 }
 
 export function getAura(id: string): AuraDef {
@@ -68,7 +68,7 @@ export function validateRegistry(): string[] {
   const check = (effects: readonly import('./types').Effect[]) => {
     for (const e of effects) {
       if (e.kind === 'aura' && !AURAS.has(e.aura)) missing.push(e.aura)
-      if (e.kind === 'delayed') check(e.effects)
+      if (e.kind === 'delayed' || e.kind === 'chance') check(e.effects)
     }
   }
   for (const a of ABILITIES.values()) {
@@ -76,7 +76,9 @@ export function validateRegistry(): string[] {
     if (a.selfEffects) check(a.selfEffects)
     if (a.everyNth) check(a.everyNth.effects)
     if (a.combo) check(a.combo.finisher)
-    if (a.target.kind === 'projectile' && a.target.hazard) check(a.target.hazard.effects)
+    if ((a.target.kind === 'projectile' || a.target.kind === 'ground') && a.target.hazard) {
+      check(a.target.hazard.effects)
+    }
   }
   return missing
 }

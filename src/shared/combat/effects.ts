@@ -1,38 +1,73 @@
 import { COMBAT } from '../sim/constants'
-import { type Aura, chestY, type Fighter } from '../sim/fighter'
+import { type Aura, chestY, type Fighter, findAura, hasCc, isImmune } from '../sim/fighter'
 import { endDash, knockback } from '../sim/movement'
 import type { CombatHost } from './host'
 import { getAura } from './registry'
-import type { AbilityDef, AuraDef, DrCategory, Effect } from './types'
+import { type AbilityDef, type AuraDef, type DamageBonus, type DrCategory, type Effect, SLOTS } from './types'
 
 export const ULT_MAX = 100
 const DR_MULT = [1, 0.5, 0.25, 0] as const
+const THORNS_REACH = 5
+
+// Set while a reflected spell resolves, so two Magic Coats can't ping-pong.
+let reflecting = false
+
+export function bonusApplies(b: DamageBonus, dst: Fighter): boolean {
+  if (b.cc && !hasCc(dst, b.cc)) return false
+  return !b.aura || findAura(dst, b.aura) !== undefined
+}
+
+function reflectable(a: AbilityDef): boolean {
+  const k = a.target.kind
+  return a.school === 'spell' && (k === 'projectile' || k === 'targeted' || k === 'hitscan')
+}
 
 // Apply a list of effects from src to dst. Harmful effects only land on
 // enemies and helpful ones only on allies, so one list can serve both sides
-// (Pollen Puff damages enemies and heals allies).
+// (Pollen Puff damages enemies and heals allies). Area effects (zones,
+// delayed blasts) can't be reflected.
 export function applyEffects(
   host: CombatHost,
   src: Fighter,
   dst: Fighter,
   ability: AbilityDef,
   effects: readonly Effect[],
+  area = false,
 ): void {
   if (!dst.alive) return
   const enemy = src.team !== dst.team
+  if (enemy && isImmune(dst)) {
+    host.emit({ t: 'immune', src: src.id, dst: dst.id, aura: ability.id })
+    return
+  }
+  if (enemy && !area && !reflecting && reflectable(ability)) {
+    const coat = dst.auras.find((a) => a.def.reflect)
+    if (coat) {
+      removeAura(host, dst, coat, 'remove')
+      host.emit({ t: 'reflect', src: src.id, dst: dst.id, ability: ability.id })
+      reflecting = true
+      try {
+        applyEffects(host, dst, src, ability, effects)
+      } finally {
+        reflecting = false
+      }
+      return
+    }
+  }
   for (const e of effects) {
     switch (e.kind) {
       case 'damage': {
         if (!enemy) break
         let amount = e.amount
-        if (e.bonus) {
-          const a = dst.auras.find((x) => x.def.id === e.bonus?.aura)
-          if (a) {
-            amount *= e.bonus.mult
-            if (e.bonus.consume) removeAura(host, dst, a, 'remove')
-          }
+        const b = e.bonus
+        if (b && bonusApplies(b, dst)) {
+          const a = b.aura ? findAura(dst, b.aura) : undefined
+          if (b.mult) amount *= b.mult
+          if (b.perStack && a) amount += b.perStack * a.stacks
+          if (b.consume && a) removeAura(host, dst, a, 'remove')
         }
-        dealDamage(host, src, dst, amount, ability.id, false)
+        const dealt = dealDamage(host, src, dst, amount, ability.id, false)
+        if (e.drain && dealt > 0) heal(host, src, src, dealt * e.drain, ability.id, false)
         break
       }
       case 'heal':
@@ -41,12 +76,13 @@ export function applyEffects(
         break
       case 'aura': {
         const def = getAura(e.aura)
-        if (def.harmful !== enemy) break
+        // Self-inflicted drawbacks (Overheat) are the one harmful aura on yourself.
+        if (def.harmful !== enemy && src !== dst) break
         applyAura(host, src, dst, def, e.stacks ?? 1)
         break
       }
       case 'knockback': {
-        if (!enemy) break
+        if (!enemy || dst.auras.some((a) => a.def.knockImmune)) break
         let dx = dst.pos.x - src.pos.x
         let dz = dst.pos.z - src.pos.z
         const d = Math.hypot(dx, dz)
@@ -69,6 +105,9 @@ export function applyEffects(
         break
       case 'breakCc':
         breakCc(host, dst)
+        break
+      case 'chance':
+        if (host.rng.next() < e.p) applyEffects(host, src, dst, ability, e.effects, true)
         break
       case 'delayed': {
         const id = host.nextId()
@@ -111,6 +150,7 @@ export function dealDamage(
   isTick: boolean,
 ): number {
   if (!dst.alive) return 0
+  if (src.team !== dst.team && isImmune(dst)) return 0
   let mult = 1
   for (const a of src.auras) if (a.def.damageDealt !== undefined) mult *= a.def.damageDealt
   for (const a of dst.auras) if (a.def.damageTaken !== undefined) mult *= a.def.damageTaken
@@ -146,6 +186,17 @@ export function dealDamage(
       a.damageTaken += amount
       if (a.damageTaken >= a.def.breakAfterDamage) removeAura(host, dst, a, 'break')
     }
+  }
+
+  // Spiky Shield hurts whoever hits the holder up close (not damage over time).
+  if (
+    !isTick &&
+    src !== dst &&
+    src.alive &&
+    Math.hypot(src.pos.x - dst.pos.x, src.pos.z - dst.pos.z) < THORNS_REACH
+  ) {
+    const spikes = dst.auras.find((a) => a.def.thorns)
+    if (spikes?.def.thorns) dealDamage(host, dst, src, spikes.def.thorns, spikes.def.id, true)
   }
 
   if (dst.hp <= 0) kill(host, dst, src)
@@ -260,6 +311,24 @@ export function applyAura(host: CombatHost, src: Fighter, dst: Fighter, def: Aur
   }
 }
 
+// Spend stacks of an aura (Heat, Tide); removes it when none are left.
+export function consumeStacks(host: CombatHost, f: Fighter, aura: Aura, n: number): void {
+  if (aura.stacks <= n) {
+    removeAura(host, f, aura, 'remove')
+    return
+  }
+  aura.stacks -= n
+  host.emit({
+    t: 'aura',
+    src: aura.source,
+    dst: f.id,
+    aura: aura.def.id,
+    action: 'refresh',
+    stacks: aura.stacks,
+    duration: aura.remaining,
+  })
+}
+
 export function removeAura(
   host: CombatHost,
   f: Fighter,
@@ -325,7 +394,7 @@ export function breakCc(host: CombatHost, f: Fighter): void {
 
 // Durations, ticks, diminishing returns, cooldowns and resource regen.
 export function updateFighterTimers(host: CombatHost, f: Fighter, dt: number): void {
-  for (const k of ['lmb', 'rmb', 'q', 'e', 'f', 'r', 'c'] as const) {
+  for (const k of SLOTS) {
     if (f.cooldowns[k] > 0) f.cooldowns[k] = Math.max(0, f.cooldowns[k] - dt)
   }
   f.gcd = Math.max(0, f.gcd - dt)
@@ -363,7 +432,8 @@ export function updateFighterTimers(host: CombatHost, f: Fighter, dt: number): v
         if (tick.damage) {
           let dmg = (tick.damage + (tick.escalate ?? 0) * (a.ticks - 1)) * stackMult
           if (tick.movingMult && f.moving) dmg *= tick.movingMult
-          dealDamage(host, src, f, dmg, a.def.id, true)
+          const dealt = dealDamage(host, src, f, dmg, a.def.id, true)
+          if (tick.drain && dealt > 0 && src !== f) heal(host, src, src, dealt * tick.drain, a.def.id, true)
         }
         if (tick.heal) heal(host, src, f, tick.heal * stackMult, a.def.id, true)
       }

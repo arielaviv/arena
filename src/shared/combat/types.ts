@@ -1,8 +1,11 @@
 // Data model for classes, abilities and auras. Class kits are pure data built
 // from these unions; the engine in this folder interprets them.
 
-export type Slot = 'lmb' | 'rmb' | 'q' | 'e' | 'f' | 'r' | 'c'
-export const SLOTS: readonly Slot[] = ['lmb', 'rmb', 'q', 'e', 'f', 'r', 'c']
+export type CoreSlot = 'lmb' | 'rmb' | 'q' | 'e' | 'f' | 'r' | 'c'
+export type ExtraSlot = 'a1' | 'a2' | 'a3'
+export type Slot = CoreSlot | ExtraSlot
+// Action bar order.
+export const SLOTS: readonly Slot[] = ['lmb', 'rmb', 'a1', 'a2', 'a3', 'q', 'e', 'f', 'r', 'c']
 
 export type Element = 'fire' | 'water' | 'poison' | 'psychic' | 'grass' | 'normal'
 export type Role = 'healer' | 'dps'
@@ -26,6 +29,9 @@ export type AiTag =
   | 'dispel'
   | 'ult'
   | 'trinket'
+  | 'finisher' // spends stacks built by the primary
+  | 'zone' // ground area that denies the enemy something
+  | 'reflect'
 
 export interface AuraTick {
   interval: number
@@ -34,6 +40,7 @@ export interface AuraTick {
   escalate?: number // added to damage on every tick (Badly Poisoned)
   movingMult?: number // multiplier while the target is moving (Bleed)
   perStack?: boolean // amount scales with stacks (Poison)
+  drain?: number // fraction of the damage healed back to the source (Leech Seed)
 }
 
 export interface AuraDef {
@@ -56,16 +63,34 @@ export interface AuraDef {
   damageDealt?: number
   healingTaken?: number
   immuneRootSlow?: boolean
+  immune?: boolean // enemy damage, auras and knockbacks do nothing
+  noCast?: boolean // the holder can't use abilities (Withdraw)
+  reflect?: boolean // the next enemy spell aimed at the holder bounces back
+  thorns?: number // damage dealt back to anyone who hits the holder
+  knockImmune?: boolean
+  blind?: boolean // can't target anything further than BLIND_RANGE
+}
+
+export const BLIND_RANGE = 6
+
+// Extra damage when the target is in a given state.
+export interface DamageBonus {
+  aura?: string // target has this aura
+  cc?: CcKind // target is under this crowd control
+  mult?: number
+  perStack?: number // flat damage per stack of `aura`
+  consume?: boolean // remove the aura afterwards
 }
 
 export type Effect =
-  | { kind: 'damage'; amount: number; bonus?: { aura: string; mult: number; consume?: boolean } }
+  | { kind: 'damage'; amount: number; bonus?: DamageBonus; drain?: number }
   | { kind: 'heal'; amount: number }
   | { kind: 'aura'; aura: string; stacks?: number }
   | { kind: 'knockback'; force: number; lift: number }
   | { kind: 'interrupt'; lockout: number }
   | { kind: 'cleanse'; count: number; dispel: readonly DispelType[] }
   | { kind: 'breakCc' }
+  | { kind: 'chance'; p: number; effects: readonly Effect[] }
   | {
       kind: 'delayed'
       delay: number
@@ -103,7 +128,7 @@ export type Targeting =
   | { kind: 'hitscan'; range: number; side?: Side }
   | { kind: 'targeted'; range: number; side: 'enemy' | 'ally' }
   | { kind: 'self' }
-  | { kind: 'ground'; range: number; radius: number; side: Side }
+  | { kind: 'ground'; range: number; radius: number; side: Side; hazard?: HazardDef }
   | { kind: 'cone'; range: number; angle: number; side?: Side }
   | { kind: 'melee'; range: number; angle: number }
   | { kind: 'dash'; distance: number; speed: number; hitRadius: number; toTarget?: boolean }
@@ -128,6 +153,10 @@ export interface AbilityDef {
   selfEffects?: readonly Effect[]
   everyNth?: { n: number; effects: readonly Effect[] }
   combo?: { steps: number; window: number; finisher: readonly Effect[] }
+  // Cast time multiplier while the caster holds `need` stacks of an aura,
+  // which the cast then spends (Heat makes Fire Blast instant).
+  castBoost?: { aura: string; need: number; consume: number; mult: number }
+  blinkBehind?: boolean // targeted: appear behind the target first
   tags: readonly AiTag[]
   vfx: string
   blurb: string
@@ -147,5 +176,9 @@ export interface ClassDef {
   regen: number
   speedMult?: number
   colors: { primary: string; secondary: string; glow: string }
-  abilities: Record<Slot, AbilityDef>
+  abilities: Record<CoreSlot, AbilityDef> & Partial<Record<ExtraSlot, AbilityDef>>
+}
+
+export function abilityAt(cls: ClassDef, slot: Slot): AbilityDef | undefined {
+  return cls.abilities[slot]
 }

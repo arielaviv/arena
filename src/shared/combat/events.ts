@@ -40,6 +40,7 @@ export type SimEvent =
   | { t: 'cast'; src: number; ability: string; action: CastAction; reason?: FailReason; target: number }
   | { t: 'interrupt'; src: number; dst: number; ability: string; lockout: number }
   | { t: 'immune'; src: number; dst: number; aura: string }
+  | { t: 'reflect'; src: number; dst: number; ability: string }
   | { t: 'dr'; dst: number; cat: DrCategory; level: number }
   | {
       t: 'use'

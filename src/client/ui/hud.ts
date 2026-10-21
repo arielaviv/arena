@@ -1,6 +1,6 @@
 import type { SimEvent } from '../../shared/combat/events'
 import { CLASSES, findAuraDef, getAbility } from '../../shared/combat/registry'
-import { SLOTS, type Slot } from '../../shared/combat/types'
+import { abilityAt, SLOTS, type Slot } from '../../shared/combat/types'
 import type { FighterSnap } from '../../shared/net/protocol'
 import { type Bar, bar, el, setBar, setStyle, setText, show } from './dom'
 import { ArenaFrame, AuraRow, CastBar, hpColor, PartyFrame, TargetFrame } from './frames'
@@ -41,6 +41,7 @@ interface FloatItem {
 }
 
 interface SlotView {
+  wrap: HTMLDivElement
   root: HTMLDivElement
   sweep: HTMLDivElement
   cd: HTMLDivElement
@@ -154,7 +155,7 @@ export class Hud {
       const cd = el('div', 'cdtext', root)
       const key = el('div', 'key', root, s.toUpperCase())
       const name = el('div', 'w-[64px] truncate text-center text-[10px] font-semibold text-zinc-400', wrap)
-      this.slots.set(s, { root, sweep, cd, name, key, abilityId: '', wasOnCd: false })
+      this.slots.set(s, { wrap, root, sweep, cd, name, key, abilityId: '', wasOnCd: false })
     }
     this.ult = el(
       'div',
@@ -221,7 +222,9 @@ export class Hud {
       for (const s of SLOTS) {
         const v = this.slots.get(s)
         if (!v) continue
-        const a = cls.abilities[s]
+        const a = abilityAt(cls, s)
+        show(v.wrap, a !== undefined)
+        if (!a) continue
         v.abilityId = a.id
         v.root.style.setProperty('--slot-glow', s === 'c' ? '#a16207' : cls.colors.primary)
         v.root.querySelector('svg')?.remove()
@@ -233,7 +236,8 @@ export class Hud {
     SLOTS.forEach((s, i) => {
       const v = this.slots.get(s)
       if (!v) return
-      const a = cls.abilities[s]
+      const a = abilityAt(cls, s)
+      if (!a) return
       const cd = me.cd[i] ?? 0
       const ultLocked = a.tags.includes('ult') && me.ult < 100
       const frac = cd > 0 ? Math.min(1, cd / Math.max(0.01, a.cooldown)) : 0
@@ -506,9 +510,23 @@ export class Hud {
       case 'immune': {
         const target = v?.fighters.find((f) => f.id === e.dst)
         if (target && e.src === myId) this.float('IMMUNE', target.x, target.y + 2.2, target.z, '#e4e4e7', 18)
+        if (training) {
+          const aura = findAuraDef(e.aura)
+          const why = aura ? ' (diminishing returns)' : ''
+          this.logLine(
+            `${aura?.name ?? getAbility(e.aura)?.name ?? e.aura}: ${this.name(e.dst)} is immune${why}`,
+          )
+        }
+        break
+      }
+      case 'reflect': {
+        const caster = v?.fighters.find((f) => f.id === e.src)
+        if (caster && (e.src === myId || e.dst === myId)) {
+          this.float('REFLECTED', caster.x, caster.y + 2.2, caster.z, '#c4b5fd', 20)
+        }
         if (training)
           this.logLine(
-            `${findAuraDef(e.aura)?.name ?? e.aura}: ${this.name(e.dst)} is immune (diminishing returns)`,
+            `<span class="text-violet-300">${this.name(e.dst)} reflected ${getAbility(e.ability)?.name ?? ''}</span>`,
           )
         break
       }
