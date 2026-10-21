@@ -30,10 +30,12 @@ function play(match, i) {
     let seq = 0
     let welcome = null
     let bytes = 0
+    // Face the arena centre from whichever start room we spawned in.
+    let yaw = null
     const pump = setInterval(() => {
       if (sock.readyState !== 1) return
       const cmds = []
-      for (let k = 0; k < 2; k++) cmds.push({ seq: ++seq, moveX: 0, moveZ: 1, yaw: i % 2 ? Math.PI : 0, pitch: 0, buttons: 0 })
+      for (let k = 0; k < 2; k++) cmds.push({ seq: ++seq, moveX: 0, moveZ: yaw === null ? 0 : 1, yaw: yaw ?? 0, pitch: 0, buttons: 0 })
       sock.send(JSON.stringify({ type: 'inputs', cmds }))
     }, 33)
     sock.addEventListener('message', (ev) => {
@@ -46,6 +48,7 @@ function play(match, i) {
       if (msg.type === 'snap') {
         snaps++
         const me = msg.snap.fighters.find((f) => f.id === match.you)
+        if (yaw === null) yaw = me.x < 0 ? 0 : Math.PI
         if (!first && msg.snap.phase === 'live') first = { x: me.x, z: me.z, tick: msg.snap.tick }
         if (first) last = { x: me.x, z: me.z, tick: msg.snap.tick, phase: msg.snap.phase, lastSeq: me.lastSeq }
       }
