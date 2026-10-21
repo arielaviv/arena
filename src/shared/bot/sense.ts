@@ -1,11 +1,21 @@
 import { findAuraDef } from '../combat/registry'
-import type { AbilityDef, AiTag, CcKind, DrCategory, Effect, Side, Slot } from '../combat/types'
+import {
+  type AbilityDef,
+  type AiTag,
+  abilityAt,
+  type CcKind,
+  type DrCategory,
+  type Effect,
+  type Side,
+  type Slot,
+} from '../combat/types'
 import { type Fighter, hasCc, isIncapacitated, isRooted, speedMultiplier } from '../sim/fighter'
 
 // Read-only facts the bot brain needs about fighters and ability data. Pure
 // functions over sim state, so they are cheap to test and share.
 
-const SLOT_ORDER: readonly Slot[] = ['lmb', 'rmb', 'q', 'e', 'f', 'r', 'c']
+export const SLOT_ORDER: readonly Slot[] = ['lmb', 'rmb', 'q', 'e', 'f', 'r', 'c', 'a1', 'a2', 'a3']
+export const EXTRA_SLOTS: readonly Slot[] = ['a1', 'a2', 'a3']
 const DR_MULT = [1, 0.5, 0.25, 0] as const
 
 export interface CcInfo {
@@ -130,10 +140,17 @@ export function standsToCast(a: AbilityDef): boolean {
 
 export function slotWith(f: Fighter, tag: AiTag, exclude?: AiTag): Slot | null {
   for (const s of SLOT_ORDER) {
-    const a = f.cls.abilities[s]
-    if (a.tags.includes(tag) && (!exclude || !a.tags.includes(exclude))) return s
+    const a = abilityAt(f.cls, s)
+    if (a?.tags.includes(tag) && (!exclude || !a.tags.includes(exclude))) return s
   }
   return null
+}
+
+// Aura ids an ability puts on its target (for keeping DoTs rolling).
+export function appliedAuras(a: AbilityDef): string[] {
+  const ids: string[] = []
+  for (const e of a.effects) if (e.kind === 'aura') ids.push(e.aura)
+  return ids
 }
 
 export function inRange(f: Fighter, g: Fighter, a: AbilityDef): boolean {

@@ -1,4 +1,5 @@
-import type { AbilityDef, Slot } from '../combat/types'
+import { findAuraDef } from '../combat/registry'
+import { type AbilityDef, abilityAt, type Slot } from '../combat/types'
 import { aimAtPoint } from '../sim/aim'
 import { makeRayHit } from '../sim/collision'
 import { CAMERA, MOVE } from '../sim/constants'
@@ -17,11 +18,13 @@ import type { MatchSim } from '../sim/match'
 import { Rng } from '../sim/rng'
 import { type NavInfo, navInfo, type Point, waypoint } from './nav'
 import {
+  appliedAuras,
   type CcInfo,
   ccLeft,
   ccOf,
   cleansesMagic,
   drMult,
+  EXTRA_SLOTS,
   flatDist,
   fragileCc,
   hostile,
@@ -38,7 +41,7 @@ import {
 } from './sense'
 
 const hit = makeRayHit()
-const CC_SLOTS: readonly Slot[] = ['q', 'rmb', 'f', 'e']
+const CC_SLOTS: readonly Slot[] = ['q', 'rmb', 'f', 'e', 'a1', 'a2', 'a3']
 const EYE = 1.5
 const CHEST = MOVE.height * 0.62
 const RING_SAFE = 25
@@ -159,7 +162,8 @@ export class Brain {
     const intent = this.currentIntent()
     const urgent = intent === 'escape' || intent === 'juke'
     const feint = this.feint(f)
-    const pressCast = this.press !== null && standsToCast(f.cls.abilities[this.press])
+    const pressed = this.press !== null ? abilityAt(f.cls, this.press) : undefined
+    const pressCast = pressed !== undefined && standsToCast(pressed)
     const casting = f.cast !== null && !f.cast.ability.mobile
     if (feint) {
       cmd.moveX = this.strafeDir
@@ -250,8 +254,9 @@ export class Brain {
   private kickThreat(f: Fighter): boolean {
     for (const e of this.enemies) {
       const slot = slotWith(e, 'interrupt')
-      if (!slot || e.cooldowns[slot] > 0 || isIncapacitated(e)) continue
-      if (inRange(e, f, e.cls.abilities[slot]) && this.sees(e, f)) return true
+      const a = slot ? abilityAt(e.cls, slot) : undefined
+      if (!slot || !a || e.cooldowns[slot] > 0 || isIncapacitated(e)) continue
+      if (inRange(e, f, a) && this.sees(e, f)) return true
     }
     return false
   }
@@ -313,12 +318,14 @@ export class Brain {
 
   private decide(sim: MatchSim, f: Fighter, target: Fighter, cmd: InputCmd): void {
     if (this.trinket(f)) return
+    if (this.reflect(sim, f)) return
     if (this.interrupt(sim, f, cmd)) return
     if (f.cls.role === 'healer' && this.support(f, cmd)) return
     if (this.defend(f, target, cmd)) return
     if (this.ultimate(f, target, cmd)) return
     if (this.control(f, target, cmd)) return
     if (this.closeGap(f, target, cmd)) return
+    if (this.rotation(f, target, cmd)) return
     if (this.signature(f, target, cmd)) return
     this.primary(f, target)
   }
@@ -405,8 +412,8 @@ export class Brain {
       }
     }
     if (!slot || !this.kick.go || bestValue < 0.8 || this.time < this.kick.at) return false
-    const a = f.cls.abilities[slot]
-    if (!ready(f, a)) return false
+    const a = abilityAt(f.cls, slot)
+    if (!a || !ready(f, a)) return false
     const left = c.duration - c.elapsed
     if (c.elapsed / c.duration < this.kick.progress && left > 0.45) return false
     // Let our own cast land first when it finishes in time.
@@ -595,6 +602,8 @@ export class Brain {
       }
     }
 
+    if (this.supportExtras(f, low, lowPct, cmd)) return true
+
     const rmb = ab.rmb
     if (rmb.tags.includes('heal') && ready(f, rmb) && !this.running()) {
       const threshold = pressure > 0 ? 0.8 : 0.68
@@ -687,8 +696,8 @@ export class Brain {
   private enemyCcReady(): boolean {
     for (const e of this.enemies) {
       for (const slot of CC_SLOTS) {
-        const a = e.cls.abilities[slot]
-        if (!a.tags.includes('cc') || e.cooldowns[slot] > 0) continue
+        const a = abilityAt(e.cls, slot)
+        if (!a?.tags.includes('cc') || e.cooldowns[slot] > 0) continue
         const info = ccOf(a)
         if (info && info.kind !== 'stun') return true
       }
@@ -702,6 +711,7 @@ export class Brain {
       this.aimAt(f, g, 0, cmd)
       return
     }
+    cmd.ally = f.id
     const p = this.partner
     cmd.yaw = p ? Math.atan2(f.pos.z - p.pos.z, f.pos.x - p.pos.x) : f.yaw
     cmd.pitch = 0
@@ -709,17 +719,18 @@ export class Brain {
 
   // Defensive cooldowns: soak bursts, dash away from melee, knock melee off.
   private defend(f: Fighter, target: Fighter, cmd: InputCmd): boolean {
-    const ab = f.cls.abilities
     const hp = pct(f)
     const melee = this.meleeFoe(f, 7)
     const loose = melee !== null && !isIncapacitated(melee) && !isRooted(melee)
-    for (const slot of ['e', 'q', 'f'] as const) {
-      const a = ab[slot]
-      if (!a.tags.includes('defensive') || a.tags.includes('heal') || !ready(f, a)) continue
+    for (const slot of ['e', 'q', 'f', 'a1', 'a2', 'a3'] as const) {
+      const a = abilityAt(f.cls, slot)
+      if (!a?.tags.includes('defensive') || a.tags.includes('heal') || !ready(f, a)) continue
       const t = a.target
       if (t.kind === 'self') {
+        // Helpless shells are a last resort.
+        const helpless = a.selfEffects?.some((e) => e.kind === 'aura' && findAuraDef(e.aura)?.noCast) ?? false
         const stuck = (isRooted(f) || slowed(f)) && isMelee(f) && flatDist(f, target) > 4
-        if ((hp < 0.5 && this.hurt > 0.12) || stuck) {
+        if ((hp < (helpless ? 0.3 : 0.5) && this.hurt > 0.12) || (stuck && !helpless)) {
           this.press = slot
           return true
         }
@@ -845,8 +856,8 @@ export class Brain {
   private control(f: Fighter, target: Fighter, cmd: InputCmd): boolean {
     if (this.intent === 'escape' || this.intent === 'juke') return false
     for (const slot of CC_SLOTS) {
-      const a = f.cls.abilities[slot]
-      if (!a.tags.includes('cc')) continue
+      const a = abilityAt(f.cls, slot)
+      if (!a?.tags.includes('cc')) continue
       const info = ccOf(a)
       if (!info || !ready(f, a)) continue
       if (isTimed(a) && (this.running() || this.meleeFoe(f, 6) !== null)) continue
@@ -918,10 +929,11 @@ export class Brain {
   // Melee: shadowstep in, unless the strike is needed to kick a heal.
   private closeGap(f: Fighter, target: Fighter, cmd: InputCmd): boolean {
     if (!isMelee(f) || this.running()) return false
-    const slot = slotWith(f, 'gapCloser')
-    if (!slot) return false
-    const a = f.cls.abilities[slot]
-    if (!ready(f, a) || fragileCc(target)) return false
+    const pure = slotWith(f, 'gapCloser', 'interrupt')
+    const pureA = pure ? abilityAt(f.cls, pure) : undefined
+    const slot = pure && pureA && ready(f, pureA) ? pure : slotWith(f, 'gapCloser')
+    const a = slot ? abilityAt(f.cls, slot) : undefined
+    if (!slot || !a || !ready(f, a) || fragileCc(target)) return false
     const d = flatDist(f, target)
     if (d < 5 || !inRange(f, target, a) || !this.sees(f, target)) return false
     if (a.tags.includes('interrupt')) {
@@ -956,6 +968,120 @@ export class Brain {
     }
     this.press = 'rmb'
     return true
+  }
+
+  // Extra-bar support: instant heals over time, shields on whoever is hit.
+  private supportExtras(f: Fighter, low: Fighter, lowPct: number, cmd: InputCmd): boolean {
+    for (const slot of EXTRA_SLOTS) {
+      const a = abilityAt(f.cls, slot)
+      if (!a || !ready(f, a) || a.target.kind !== 'targeted' || a.target.side !== 'ally') continue
+      if (a.tags.includes('heal')) {
+        if (lowPct < 0.85 && !this.hasOwnHot(low, f)) {
+          this.aimAtAlly(f, low, cmd)
+          this.press = slot
+          return true
+        }
+        continue
+      }
+      if (!a.tags.includes('defensive')) continue
+      const shields = appliedAuras(a)
+      for (const g of this.allies) {
+        if (!g.alive || pct(g) > 0.8 || this.pressureOn(g) <= 0) continue
+        if (g.auras.some((x) => shields.includes(x.def.id))) continue
+        if (g !== f && (flatDist(f, g) > a.target.range || !this.sees(f, g))) continue
+        this.aimAtAlly(f, g, cmd)
+        this.press = slot
+        return true
+      }
+    }
+    return false
+  }
+
+  // Magic Coat: raise it when a spell is about to land on us.
+  private reflect(sim: MatchSim, f: Fighter): boolean {
+    const slot = slotWith(f, 'reflect')
+    const a = slot ? abilityAt(f.cls, slot) : undefined
+    if (!slot || !a || !ready(f, a)) return false
+    let threat = false
+    for (const e of this.enemies) {
+      const c = e.cast
+      if (!c || c.channel || c.targetId !== f.id || c.ability.school !== 'spell') continue
+      const left = c.duration - c.elapsed
+      if (left < 0.4 && c.elapsed > this.reaction) threat = true
+    }
+    for (const p of sim.projectiles) {
+      if (p.homing !== f.id || p.ability.school !== 'spell' || p.ability.tags.includes('primary')) continue
+      if (Math.hypot(p.x - f.pos.x, p.z - f.pos.z) < 9) threat = true
+    }
+    if (!threat || !this.rng.chance(0.35 + 0.6 * this.skill)) return false
+    this.press = slot
+    return true
+  }
+
+  // The extra bar in a fight: keep DoTs up, spend stacks, nuke, smoke the healer.
+  private rotation(f: Fighter, target: Fighter, cmd: InputCmd): boolean {
+    if (this.running()) return false
+    for (const slot of EXTRA_SLOTS) {
+      const a = abilityAt(f.cls, slot)
+      if (!a || !ready(f, a)) continue
+      const t = a.target
+      if (a.tags.includes('zone') && t.kind === 'ground') {
+        const eh = this.enemyHealer
+        if (!eh || eh === target || pct(target) > 0.55) continue
+        if (flatDist(f, eh) > t.range - 1 || !this.sees(f, eh)) continue
+        this.aimAtGround(f, eh.pos.x, eh.pos.z, cmd)
+        this.press = slot
+        return true
+      }
+      if (a.tags.includes('dot')) {
+        if (fragileCc(target) || !inRange(f, target, a) || !this.sees(f, target)) continue
+        const ids = appliedAuras(a)
+        const up = target.auras.some((x) => ids.includes(x.def.id) && x.source === f.id && x.remaining > 2)
+        if (up) continue
+        this.aimAt(f, target, 0, cmd)
+        this.press = slot
+        return true
+      }
+      if (a.tags.includes('finisher')) {
+        if (!inRange(f, target, a) || !this.sees(f, target)) continue
+        let stacks = 0
+        for (const e of a.effects) {
+          const aura = e.kind === 'damage' ? e.bonus?.aura : undefined
+          if (aura) stacks = target.auras.find((x) => x.def.id === aura)?.stacks ?? 0
+        }
+        if (stacks < 3 && !(stacks >= 1 && pct(target) < 0.3)) continue
+        this.aimAt(f, target, 0, cmd)
+        this.press = slot
+        return true
+      }
+      if (!a.tags.includes('nuke')) continue
+      // A bonus against crowd control (Dream Eater) goes on whoever is held.
+      const ccBonus = a.effects.find((e) => e.kind === 'damage' && e.bonus?.cc)
+      if (ccBonus && ccBonus.kind === 'damage' && ccBonus.bonus?.cc) {
+        const cc = ccBonus.bonus.cc
+        const held = this.enemies.find(
+          (e) => e.auras.some((x) => x.def.cc === cc) && inRange(f, e, a) && this.sees(f, e),
+        )
+        // Only cash in a sleep on the kill target, or when the sleep is ending.
+        const sleepLeft = held ? ccLeft(held, true) : 0
+        if (!held || (held !== target && sleepLeft > 1.2)) continue
+        this.aimAt(f, held, 0, cmd)
+        this.press = slot
+        return true
+      }
+      if (fragileCc(target) || !inRange(f, target, a) || !this.sees(f, target)) continue
+      if (t.kind === 'cone' && flatDist(f, target) > t.range * 0.8) continue
+      if (isTimed(a)) {
+        const m = this.meleeFoe(f, 7)
+        if (m && !isIncapacitated(m) && !isRooted(m)) continue
+        if (pct(target) > 0.75 && f.resource < f.maxResource * 0.6) continue
+        if (this.canDodge(target, f, a.castTime ?? 0)) continue
+      }
+      this.aimAt(f, target, t.kind === 'projectile' ? t.speed : 0, cmd)
+      this.press = slot
+      return true
+    }
+    return false
   }
 
   private primary(f: Fighter, target: Fighter): void {
@@ -1320,7 +1446,10 @@ export class Brain {
 
   // ---------------------------------------------------------------- aim
 
+  // Selects g (enemy target or heal target) and points the crosshair at it.
   private aimAt(f: Fighter, g: Fighter, projectileSpeed: number, cmd: InputCmd): void {
+    if (g.team === f.team) cmd.ally = g.id
+    else cmd.target = g.id
     let tx = g.pos.x
     let ty = chestY(g)
     let tz = g.pos.z
@@ -1338,6 +1467,9 @@ export class Brain {
   private aimAtGround(f: Fighter, x: number, z: number, cmd: InputCmd): void {
     aimAtPoint(f, x, 0.05, z, this.aim)
     this.applyAim(cmd)
+    cmd.aimX = x
+    cmd.aimY = 0
+    cmd.aimZ = z
   }
 
   private applyAim(cmd: InputCmd): void {
