@@ -202,6 +202,33 @@ body {
   margin-left: -60px;
   pointer-events: none;
   will-change: transform;
+  transform-origin: 50% 100%;
+}
+
+/* The selected target: brighter name and a marker above it. */
+.nameplate.selected > div:first-child {
+  color: #fff;
+}
+
+.nameplate.selected::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: -14px;
+  width: 0;
+  height: 0;
+  margin-left: -7px;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 9px solid #f43f5e;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+  animation: target-bob 1.2s ease-in-out infinite;
+}
+
+@keyframes target-bob {
+  50% {
+    transform: translateY(-3px);
+  }
 }
 
 .banner {

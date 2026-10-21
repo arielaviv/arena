@@ -5,9 +5,13 @@ import { Block } from '../../shared/sim/geometry'
 
 const hit = makeRayHit()
 
-// Over-the-shoulder camera. Uses the same numbers as the sim's canonical aim
-// camera, then smooths height, pulls in against walls and adds juice.
+// Over-the-shoulder camera. Action controls use the same numbers as the
+// sim's canonical aim camera (so the crosshair is honest); classic controls
+// zoom with the wheel and sit closer to centre. Smooths height, pulls in
+// against walls and adds juice.
 export class CameraRig {
+  distance: number = CAMERA.distance
+  shoulder: number = CAMERA.shoulder
   private pivotY = 0
   private fovKick = 0
   private trauma = 0
@@ -49,10 +53,10 @@ export class CameraRig {
     const rz = Math.cos(yaw)
 
     // Pull in when a wall sits between the head and the camera.
-    let want: number = CAMERA.distance
+    let want = this.distance
     if (world) {
-      const sx = x + rx * CAMERA.shoulder
-      const sz = z + rz * CAMERA.shoulder
+      const sx = x + rx * this.shoulder
+      const sz = z + rz * this.shoulder
       if (
         world.raycastPrisms(
           sx,
@@ -61,7 +65,7 @@ export class CameraRig {
           -this.dir.x,
           -this.dir.y,
           -this.dir.z,
-          CAMERA.distance + 0.3,
+          this.distance + 0.3,
           Block.Los,
           hit,
         )
@@ -78,9 +82,9 @@ export class CameraRig {
     this.pull = want < this.pull ? want : this.pull + (want - this.pull) * (1 - Math.exp(-dt * 5))
 
     this.position.set(
-      x - this.dir.x * this.pull + rx * CAMERA.shoulder,
+      x - this.dir.x * this.pull + rx * this.shoulder,
       this.pivotY - this.dir.y * this.pull,
-      z - this.dir.z * this.pull + rz * CAMERA.shoulder,
+      z - this.dir.z * this.pull + rz * this.shoulder,
     )
 
     // Shake

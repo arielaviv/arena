@@ -86,6 +86,11 @@ export class Hud {
   // L toggles the combat log during arena matches.
   logInArena = false
   private lastView: HudView | null = null
+  private readonly crosshair: HTMLDivElement
+  // Fighter shown in each party / arena frame, for click-to-select.
+  private partyIds: number[] = []
+  private arenaIds: number[] = []
+  onPickFighter: ((id: number) => void) | null = null
 
   constructor(parent: HTMLElement) {
     this.root = el('div', 'absolute inset-0 select-none', parent)
@@ -93,7 +98,7 @@ export class Hud {
     this.plateLayer = el('div', 'absolute inset-0 overflow-hidden', this.root)
     this.floatLayer = el('div', 'absolute inset-0 overflow-hidden', this.root)
 
-    el(
+    this.crosshair = el(
       'div',
       'crosshair',
       this.root,
@@ -179,6 +184,10 @@ export class Hud {
     show(this.root, v)
   }
 
+  setCrosshair(visible: boolean): void {
+    show(this.crosshair, visible)
+  }
+
   setSpectating(name: string | null): void {
     show(this.spectate, name !== null)
     if (name) setText(this.spectate, `Spectating ${name}`)
@@ -197,8 +206,18 @@ export class Hud {
     const enemies = view.fighters.filter(
       (f) => f.team !== me.team && (view.mode === 'arena' || f.control !== 'dummy'),
     )
-    while (this.party.length < allies.length) this.party.push(new PartyFrame(this.partyWrap))
-    while (this.arena.length < enemies.length) this.arena.push(new ArenaFrame(this.arenaWrap))
+    while (this.party.length < allies.length) {
+      const i = this.party.length
+      const frame = new PartyFrame(this.partyWrap)
+      this.clickable(frame.root, () => this.partyIds[i])
+      this.party.push(frame)
+    }
+    while (this.arena.length < enemies.length) {
+      const i = this.arena.length
+      const frame = new ArenaFrame(this.arenaWrap)
+      this.clickable(frame.root, () => this.arenaIds[i])
+      this.arena.push(frame)
+    }
     this.party.forEach((p, i) => {
       show(p.root, i < allies.length)
     })
@@ -207,6 +226,15 @@ export class Hud {
     })
     show(this.log, view.mode === 'training' || this.logInArena)
     show(this.trainingPanel, view.mode === 'training')
+  }
+
+  private clickable(root: HTMLElement, id: () => number | undefined): void {
+    root.classList.add('interactive', 'cursor-pointer')
+    root.addEventListener('mousedown', (e) => {
+      e.stopPropagation()
+      const f = id()
+      if (f !== undefined) this.onPickFighter?.(f)
+    })
   }
 
   update(view: HudView, dt: number): void {
@@ -278,6 +306,7 @@ export class Hud {
           f.team === me.team && (view.mode === 'arena' || f.control !== 'dummy' || f.dummyRole === 'ally'),
       )
       .sort((a, b) => (a.id === me.id ? -1 : b.id === me.id ? 1 : 0))
+    this.partyIds = allies.map((f) => f.id)
     allies.forEach((f, i) => {
       const visible = f.id === me.id || (Math.hypot(f.x - me.x, f.z - me.z) < 40 && view.hasLos(me, f))
       this.party[i]?.update(f, me.team, me.focus === f.id, visible, dt)
@@ -285,6 +314,7 @@ export class Hud {
     const enemies = view.fighters.filter(
       (f) => f.team !== me.team && (view.mode === 'arena' || f.control !== 'dummy'),
     )
+    this.arenaIds = enemies.map((f) => f.id)
     enemies.forEach((f, i) => {
       this.arena[i]?.update(f, me.team, me.target === f.id, dt)
     })
@@ -412,7 +442,11 @@ export class Hud {
       const visible = p.visible && f.alive && dist < 70
       show(plate.root, visible)
       if (!visible) continue
-      setStyle(plate.root, 'transform', `translate(${p.x.toFixed(1)}px, ${(p.y - 30).toFixed(1)}px)`)
+      // Your target's plate is bigger and marked, so it reads at any range.
+      const selected = me !== null && f.id === me.target
+      const scale = selected ? ' scale(1.18)' : ''
+      setStyle(plate.root, 'transform', `translate(${p.x.toFixed(1)}px, ${(p.y - 30).toFixed(1)}px)${scale}`)
+      plate.root.classList.toggle('selected', selected)
       setText(plate.name, f.name)
       setBar(plate.hp, f.hp / f.maxHp)
       setStyle(plate.hp.fill, 'background', hpColor(f.team, me ? me.team : 0))
