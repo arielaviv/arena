@@ -92,6 +92,7 @@ export interface Fighter {
   confuseYaw: number
   combatTimer: number
   stats: FighterStats
+  safe: Vector3 // last grounded position, for the fall safety net
   spawnX: number
   spawnZ: number
   spawnYaw: number
@@ -160,6 +161,7 @@ export function makeFighter(
     confuseYaw: 0,
     combatTimer: 0,
     stats: { damage: 0, healing: 0, interrupts: 0, cc: 0 },
+    safe: new Vector3(x, y, z),
     spawnX: x,
     spawnZ: z,
     spawnYaw: yaw,

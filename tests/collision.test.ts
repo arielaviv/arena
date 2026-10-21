@@ -112,3 +112,31 @@ describe('segment vs vertical capsule axis', () => {
     expect(Math.sqrt(c.dist2)).toBeCloseTo(0.3)
   })
 })
+
+describe('falling out of the world', () => {
+  it('teleport cannot tunnel through the ring wall', async () => {
+    const { makeFighter } = await import('../src/shared/sim/fighter')
+    const { stepMovement } = await import('../src/shared/sim/movement')
+    const { CLASSES } = await import('../src/shared/combat/registry')
+    const { emptyInput } = await import('../src/shared/sim/fighter')
+    const f = makeFighter(1, 0, 't', CLASSES.lumora, 'human', 0, 0, ARENA.radius - 3, Math.PI / 2)
+    const ability = CLASSES.lumora.abilities.e
+    f.dash = { ability, dirX: 0, dirZ: 1, remaining: 10, speed: 130, targetId: -1, hit: false }
+    for (let i = 0; i < 30; i++) stepMovement(f, { ...emptyInput(), yaw: Math.PI / 2 }, world, 1 / 60)
+    expect(Math.hypot(f.pos.x, f.pos.z)).toBeLessThan(ARENA.radius)
+    expect(f.pos.y).toBeGreaterThan(-1)
+  })
+
+  it('anyone below the floor is put back on safe ground', async () => {
+    const { makeFighter, emptyInput } = await import('../src/shared/sim/fighter')
+    const { stepMovement } = await import('../src/shared/sim/movement')
+    const { CLASSES } = await import('../src/shared/combat/registry')
+    const f = makeFighter(1, 0, 't', CLASSES.cindrake, 'human', 2, 0, 2, 0)
+    stepMovement(f, emptyInput(), world, 1 / 60)
+    f.pos.set(80, -20, 80)
+    f.grounded = false
+    stepMovement(f, emptyInput(), world, 1 / 60)
+    expect(f.pos.y).toBeGreaterThan(-1)
+    expect(Math.hypot(f.pos.x, f.pos.z)).toBeLessThan(ARENA.radius)
+  })
+})

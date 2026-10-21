@@ -9,6 +9,11 @@ const before = new Vector3()
 // Advance one fighter's movement by dt. Shared by the authoritative sim and
 // client prediction, so it must only depend on (fighter, cmd, world, dt).
 export function stepMovement(f: Fighter, cmd: InputCmd, world: World, dt: number): void {
+  stepMovementInner(f, cmd, world, dt)
+  recoverIfLost(f, world)
+}
+
+function stepMovementInner(f: Fighter, cmd: InputCmd, world: World, dt: number): void {
   f.yaw = cmd.yaw
   f.pitch = cmd.pitch
   if (!f.alive) {
@@ -170,22 +175,50 @@ function accelerate(f: Fighter, tx: number, tz: number, accel: number, dt: numbe
   }
 }
 
+// Longest distance moved between collision checks. Walls are 0.6 m thick, so
+// anything faster (Teleport covers 2 m a tick) is split into sub-steps.
+const MAX_STEP = 0.25
+
 function stepDash(f: Fighter, world: World, dt: number): void {
   const d = f.dash
   if (!d) return
-  const stepLen = Math.min(d.remaining, d.speed * dt)
+  const total = Math.min(d.remaining, d.speed * dt)
   f.vel.set(d.dirX * d.speed, 0, d.dirZ * d.speed)
-  before.copy(f.pos)
-  f.pos.x += d.dirX * stepLen
-  f.pos.z += d.dirZ * stepLen
-  const blocked = world.resolveCapsule(f.pos, MOVE.radius, MOVE.height, MOVE.step)
-  d.remaining -= stepLen
   f.move = 'dash'
+  const steps = Math.max(1, Math.ceil(total / MAX_STEP))
+  const stepLen = total / steps
+  let stopped = false
+  for (let i = 0; i < steps; i++) {
+    before.copy(f.pos)
+    f.pos.x += d.dirX * stepLen
+    f.pos.z += d.dirZ * stepLen
+    const blocked = world.resolveCapsule(f.pos, MOVE.radius, MOVE.height, MOVE.step)
+    d.remaining -= stepLen
+    // Ran into something: stop where we are.
+    if (blocked && f.pos.distanceToSquared(before) < stepLen * stepLen * 0.25) {
+      stopped = true
+      break
+    }
+  }
   const ground = world.groundHeight(f.pos.x, f.pos.z, f.pos.y + MOVE.step)
   if (Number.isFinite(ground)) f.pos.y = Math.max(ground, f.pos.y - 9 * dt)
-  if (d.remaining <= 1e-4 || (blocked && f.pos.distanceToSquared(before) < stepLen * stepLen * 0.25)) {
-    endDash(f)
+  if (stopped || d.remaining <= 1e-4) endDash(f)
+}
+
+// Safety net: anyone who ends up below the world or outside it goes back to
+// the last ground they stood on.
+export function recoverIfLost(f: Fighter, world: World): boolean {
+  const out = Math.hypot(f.pos.x, f.pos.z) > world.geo.bounds + 4
+  if (f.pos.y > -6 && !out && Number.isFinite(f.pos.x + f.pos.y + f.pos.z)) {
+    if (f.grounded) f.safe.copy(f.pos)
+    return false
   }
+  f.pos.copy(f.safe)
+  f.vel.set(0, 0, 0)
+  f.dash = null
+  f.grounded = true
+  f.move = 'idle'
+  return true
 }
 
 export function endDash(f: Fighter): void {
@@ -203,13 +236,24 @@ function integrate(f: Fighter, world: World, dt: number): void {
     f.vel.x *= MOVE.maxSpeed / speed
     f.vel.z *= MOVE.maxSpeed / speed
   }
+  // Fast slides and knockbacks move in collision-checked pieces so they can't
+  // tunnel through a wall in one tick.
+  const travel = Math.hypot(f.vel.x, f.vel.z) * dt
+  const pieces = Math.max(1, Math.ceil(travel / MAX_STEP))
+  const sx = (f.vel.x * dt) / pieces
+  const sz = (f.vel.z * dt) / pieces
+  for (let i = 0; i < pieces - 1; i++) {
+    f.pos.x += sx
+    f.pos.z += sz
+    world.resolveCapsule(f.pos, MOVE.radius, hurtHeight(f), MOVE.step)
+  }
   before.copy(f.pos)
-  f.pos.x += f.vel.x * dt
-  f.pos.z += f.vel.z * dt
+  f.pos.x += sx
+  f.pos.z += sz
   if (world.resolveCapsule(f.pos, MOVE.radius, hurtHeight(f), MOVE.step)) {
     // Remove the velocity component pointing into whatever pushed us.
-    const px = f.pos.x - (before.x + f.vel.x * dt)
-    const pz = f.pos.z - (before.z + f.vel.z * dt)
+    const px = f.pos.x - (before.x + sx)
+    const pz = f.pos.z - (before.z + sz)
     const pl = Math.hypot(px, pz)
     if (pl > 1e-6) {
       const nx = px / pl
