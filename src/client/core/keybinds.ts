@@ -1,5 +1,10 @@
 import { Btn } from '../../shared/sim/input'
 
+// Classic: visible cursor, click units to target, drag to turn the camera,
+// spells on the number row. Action: mouselook with a crosshair, primary and
+// signature on the mouse buttons.
+export type ControlScheme = 'classic' | 'action'
+
 export type Action =
   | 'forward'
   | 'back'
@@ -9,33 +14,50 @@ export type Action =
   | 'slide'
   | 'lmb'
   | 'rmb'
+  | 'a1'
+  | 'a2'
+  | 'a3'
   | 'q'
   | 'e'
   | 'f'
   | 'r'
   | 'c'
+  | 'target'
   | 'focusSelf'
   | 'focusAlly'
 
 export type Keybinds = Record<Action, string>
 
-// Codes are KeyboardEvent.code values, or Mouse0..Mouse4 for mouse buttons.
-export const DEFAULT_KEYBINDS: Keybinds = {
+const SHARED = {
   forward: 'KeyW',
   back: 'KeyS',
   left: 'KeyA',
   right: 'KeyD',
   jump: 'Space',
   slide: 'ShiftLeft',
-  lmb: 'Mouse0',
-  rmb: 'Mouse2',
   q: 'KeyQ',
   e: 'KeyE',
   f: 'KeyF',
   r: 'KeyR',
   c: 'KeyC',
+  target: 'Tab',
   focusSelf: 'F1',
   focusAlly: 'F2',
+} as const
+
+// Codes are KeyboardEvent.code values, or Mouse0..Mouse4 for mouse buttons.
+const CLASSIC: Keybinds = {
+  ...SHARED,
+  lmb: 'Digit1',
+  rmb: 'Digit2',
+  a1: 'Digit3',
+  a2: 'Digit4',
+  a3: 'Digit5',
+}
+const ACTION: Keybinds = { ...SHARED, lmb: 'Mouse0', rmb: 'Mouse2', a1: 'Digit1', a2: 'Digit2', a3: 'Digit3' }
+
+export function defaultKeybinds(scheme: ControlScheme): Keybinds {
+  return { ...(scheme === 'classic' ? CLASSIC : ACTION) }
 }
 
 export const ACTION_LABEL: Record<Action, string> = {
@@ -47,11 +69,15 @@ export const ACTION_LABEL: Record<Action, string> = {
   slide: 'Slide',
   lmb: 'Primary',
   rmb: 'Signature',
+  a1: 'Spell 1',
+  a2: 'Spell 2',
+  a3: 'Spell 3',
   q: 'Crowd control',
   e: 'Defensive',
   f: 'Interrupt',
   r: 'Ultimate',
   c: 'Lum Berry',
+  target: 'Next target',
   focusSelf: 'Focus self',
   focusAlly: 'Focus partner',
 }
@@ -61,6 +87,9 @@ export const ACTION_BUTTON: Partial<Record<Action, number>> = {
   slide: Btn.Slide,
   lmb: Btn.Lmb,
   rmb: Btn.Rmb,
+  a1: Btn.A1,
+  a2: Btn.A2,
+  a3: Btn.A3,
   q: Btn.Q,
   e: Btn.E,
   f: Btn.F,
@@ -85,10 +114,10 @@ export function keyLabel(code: string): string {
   return code.replace('Arrow', '')
 }
 
-export function sanitizeKeybinds(raw: unknown): Keybinds {
-  const out: Keybinds = { ...DEFAULT_KEYBINDS }
+export function sanitizeKeybinds(raw: unknown, scheme: ControlScheme): Keybinds {
+  const out = defaultKeybinds(scheme)
   if (typeof raw !== 'object' || raw === null) return out
-  for (const action of Object.keys(DEFAULT_KEYBINDS) as Action[]) {
+  for (const action of Object.keys(out) as Action[]) {
     const v = (raw as Record<string, unknown>)[action]
     if (typeof v === 'string' && v.length > 0) out[action] = v
   }

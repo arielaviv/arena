@@ -28,11 +28,12 @@ export class TrainingControls {
     this.render()
   }
 
-  onKey(code: string): void {
+  // Shift + 1-5 swaps class (the number row casts spells); 6-0 are toggles.
+  onKey(code: string, shift: boolean): void {
     const s = this.app.session
     if (!s) return
     const n = Number(code.replace('Digit', ''))
-    if (code.startsWith('Digit') && n >= 1 && n <= PLAYABLE.length) {
+    if (shift && code.startsWith('Digit') && n >= 1 && n <= PLAYABLE.length) {
       const id = PLAYABLE[n - 1]
       if (id) s.swapClass(id)
     } else if (code === 'Digit6') s.sendTraining({ kind: 'resetCooldowns' })
@@ -54,7 +55,7 @@ export class TrainingControls {
 
   private render(): void {
     const classes = PLAYABLE.map(
-      (id, i) => `<span class="text-zinc-100">${i + 1}</span> ${CLASSES[id].name}`,
+      (id, i) => `<span class="text-zinc-100">⇧${i + 1}</span> ${CLASSES[id].name}`,
     ).join('<br>')
     const toggles = Object.values(this.toggles)
       .map(

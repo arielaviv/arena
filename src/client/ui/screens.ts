@@ -1,5 +1,5 @@
 import { CLASSES, PLAYABLE } from '../../shared/combat/registry'
-import type { ClassId } from '../../shared/combat/types'
+import { abilityAt, type ClassId } from '../../shared/combat/types'
 import type { FighterSnap } from '../../shared/net/protocol'
 import { ACTION_LABEL, type Action, type Keybinds, keyLabel } from '../core/keybinds'
 import { el, show } from './dom'
@@ -94,9 +94,14 @@ export class ClassPickScreen {
         c.role === 'healer' ? 'Healer' : 'DPS',
       )
       el('div', 'mt-1 text-xs font-semibold text-zinc-400', card, c.archetype)
-      const kit = el('div', 'mt-3 flex gap-1 opacity-70 transition group-hover:opacity-100', card)
-      for (const s of ['lmb', 'rmb', 'q', 'e', 'f', 'r'] as const) {
-        const a = c.abilities[s]
+      const kit = el(
+        'div',
+        'mt-3 flex flex-wrap justify-center gap-1 px-3 opacity-70 transition group-hover:opacity-100',
+        card,
+      )
+      for (const s of ['lmb', 'rmb', 'a1', 'a2', 'a3', 'q', 'e', 'f', 'r'] as const) {
+        const a = abilityAt(c, s)
+        if (!a) continue
         const chip = el(
           'div',
           'grid h-7 w-7 place-items-center rounded-md border border-zinc-700 bg-zinc-800',
@@ -181,6 +186,7 @@ export class PauseScreen {
   readonly leave: HTMLButtonElement
   readonly sens: HTMLInputElement
   readonly quality: HTMLSelectElement
+  readonly controls: HTMLSelectElement
 
   constructor(parent: HTMLElement) {
     this.root = el(
@@ -199,6 +205,15 @@ export class PauseScreen {
       'hud-panel mt-6 flex w-[320px] flex-col gap-3 p-4 text-sm text-zinc-300',
       this.root,
     )
+    const s0 = el('label', 'flex items-center justify-between gap-3', settings, '<span>Controls</span>')
+    this.controls = el('select', 'rounded bg-zinc-800 px-2 py-1 text-zinc-100', s0)
+    for (const [value, label] of [
+      ['classic', 'Classic (cursor)'],
+      ['action', 'Action (mouselook)'],
+    ] as const) {
+      const o = el('option', '', this.controls, label)
+      o.value = value
+    }
     const s1 = el('label', 'flex items-center justify-between gap-3', settings, '<span>Sensitivity</span>')
     this.sens = el('input', 'w-40 accent-zinc-100', s1)
     this.sens.type = 'range'
@@ -246,6 +261,10 @@ export class PauseScreen {
 
   setVisible(v: boolean): void {
     show(this.root, v)
+  }
+
+  get visible(): boolean {
+    return this.root.style.display !== 'none'
   }
 }
 

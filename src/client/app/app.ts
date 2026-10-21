@@ -4,7 +4,8 @@ import type { ClassId } from '../../shared/combat/types'
 import { buildArena } from '../../shared/sim/layout'
 import { Audio } from '../core/audio'
 import { Input } from '../core/input'
-import { DEFAULT_KEYBINDS, keyLabel } from '../core/keybinds'
+import { type ControlScheme, defaultKeybinds, keyLabel } from '../core/keybinds'
+import { Pointer } from '../core/pointer'
 import { type Quality, Renderer } from '../core/renderer'
 import { findMatch, type MatchTicket, roomUrl, serverBase } from '../net/online'
 import { WebSocketTransport } from '../net/wsTransport'
@@ -13,7 +14,7 @@ import { models } from '../render/models'
 import { renderThumbnails } from '../render/thumbs'
 import { Vfx } from '../render/vfx'
 import { type ThemeId, WorldView } from '../render/world'
-import { Session } from '../session'
+import { Session, type SessionOptions } from '../session'
 import { Hud } from '../ui/hud'
 import { ClassPickScreen, MatchFoundScreen, PauseScreen, ResultsScreen, TitleScreen } from '../ui/screens'
 import { buildArenaMatch, buildTrainingMatch } from './matchmaker'
@@ -28,6 +29,7 @@ const MATCH_FOUND_SECONDS = 1.15
 export class App {
   readonly renderer: Renderer
   readonly input: Input
+  readonly pointer: Pointer
   readonly audio = new Audio()
   readonly hud: Hud
   private readonly title: TitleScreen
@@ -61,8 +63,13 @@ export class App {
     this.input = new Input(canvas)
     this.input.sensitivity = this.settings.sensitivity
     this.input.setBinds(this.settings.keybinds)
+    this.input.classic = this.settings.controls === 'classic'
+    this.pointer = new Pointer(canvas, this.input)
+    this.pointer.onClick = (button, x, y) => this.session?.click(button, x, y)
     this.hud = new Hud(ui)
     this.hud.setVisible(false)
+    this.hud.setCrosshair(!this.input.classic)
+    this.hud.onPickFighter = (id) => this.session?.select(id)
     this.title = new TitleScreen(ui)
     this.pick = new ClassPickScreen(ui)
     this.pick.setVisible(false)
@@ -87,7 +94,7 @@ export class App {
       })
     }
     this.pause.resetKeys.addEventListener('click', () => {
-      this.settings.keybinds = { ...DEFAULT_KEYBINDS }
+      this.settings.keybinds = defaultKeybinds(this.settings.controls)
       this.input.setBinds(this.settings.keybinds)
       saveSettings(this.settings)
       this.applyKeyLabels()
@@ -118,7 +125,14 @@ export class App {
     this.pick.onPick = (id) => this.choose(id)
     this.pick.back.addEventListener('click', () => this.goTitle())
     this.pick.trainingLink.addEventListener('click', () => this.openPick('training'))
-    this.pause.resume.addEventListener('click', () => this.input.lock())
+    this.pause.resume.addEventListener('click', () => {
+      if (this.input.classic) this.pause.setVisible(false)
+      else this.input.lock()
+    })
+    this.pause.controls.value = this.settings.controls
+    this.pause.controls.addEventListener('change', () => {
+      this.setControls(this.pause.controls.value === 'action' ? 'action' : 'classic')
+    })
     this.pause.leave.addEventListener('click', () => this.goTitle())
     this.pause.sens.value = String(this.settings.sensitivity)
     this.pause.sens.addEventListener('input', () => {
@@ -135,12 +149,12 @@ export class App {
       saveSettings(this.settings)
     })
     canvas.addEventListener('click', () => {
-      if (this.state === 'match' && !this.input.locked) this.input.lock()
+      if (this.state === 'match' && !this.input.classic && !this.input.locked) this.input.lock()
     })
     this.input.onLockChange = (locked) => {
-      if (this.state === 'match') this.pause.setVisible(!locked)
+      if (this.state === 'match' && !this.input.classic) this.pause.setVisible(!locked)
     }
-    this.input.onKey = (code) => this.onKey(code)
+    this.input.onKey = (code, shift) => this.onKey(code, shift)
 
     this.showMenu()
     // Creature models stream in behind the title; thumbnails follow them.
@@ -153,11 +167,37 @@ export class App {
     })
   }
 
+  // Classic: cursor, click targeting, number-row spells. Action: mouselook.
+  private setControls(scheme: ControlScheme): void {
+    const classic = scheme === 'classic'
+    this.settings.controls = scheme
+    this.settings.keybinds = defaultKeybinds(scheme)
+    saveSettings(this.settings)
+    this.input.classic = classic
+    this.input.setBinds(this.settings.keybinds)
+    this.pointer.enabled = classic && this.state === 'match'
+    this.hud.setCrosshair(!classic)
+    this.session?.setControls(scheme)
+    if (classic) this.input.unlock()
+    this.applyKeyLabels()
+    this.pause.renderKeybinds(this.settings.keybinds, null)
+  }
+
+  private makeSession(opts: Omit<SessionOptions, 'controls'>): Session {
+    return new Session(this.renderer, this.input, this.hud, this.audio, this.pointer, {
+      ...opts,
+      controls: this.settings.controls,
+    })
+  }
+
   private applyKeyLabels(): void {
     const b = this.settings.keybinds
     this.hud.setKeyLabels({
       lmb: keyLabel(b.lmb),
       rmb: keyLabel(b.rmb),
+      a1: keyLabel(b.a1),
+      a2: keyLabel(b.a2),
+      a3: keyLabel(b.a3),
       q: keyLabel(b.q),
       e: keyLabel(b.e),
       f: keyLabel(b.f),
@@ -221,7 +261,7 @@ export class App {
     this.menu = null
   }
 
-  private onKey(code: string): void {
+  private onKey(code: string, shift: boolean): void {
     if (this.state === 'queue' && code === 'Escape') {
       this.cancelQueue()
       this.matchFound.hide()
@@ -239,8 +279,18 @@ export class App {
       if (code === 'Escape') this.goTitle()
     } else if (this.state === 'results' && code === 'Space') this.nextMatch()
     else if (this.state === 'results' && code === 'Escape') this.goTitle()
-    else if (this.state === 'match' && code === 'KeyL') this.hud.logInArena = !this.hud.logInArena
-    else if (this.state === 'match' && this.session?.mode === 'training') this.training.onKey(code)
+    else if (this.state === 'match') this.onMatchKey(code, shift)
+  }
+
+  private onMatchKey(code: string, shift: boolean): void {
+    const s = this.session
+    if (code === 'Escape' && this.input.classic) {
+      // Escape drops the target first, then opens the menu.
+      if (this.pause.visible) this.pause.setVisible(false)
+      else if (!s?.clearTarget()) this.pause.setVisible(true)
+    } else if (code === this.settings.keybinds.target) s?.tabTarget()
+    else if (code === 'KeyL') this.hud.logInArena = !this.hud.logInArena
+    else if (s?.mode === 'training') this.training.onKey(code, shift)
   }
 
   private onPlay(): void {
@@ -280,7 +330,9 @@ export class App {
     this.pause.setVisible(false)
     this.hud.setVisible(true)
     this.hud.setBanner('', '')
-    this.input.lock()
+    this.pointer.enabled = this.input.classic
+    this.input.clearTaps()
+    if (!this.input.classic) this.input.lock()
     if (!this.settings.qualityChosen) this.perf.arm()
     void session.prepare()
   }
@@ -299,7 +351,7 @@ export class App {
     this.hideMenuScreens()
     this.state = 'queue'
     this.matchFound.search()
-    this.input.lock()
+    if (!this.input.classic) this.input.lock()
     const ticket = findMatch(base, id, ensurePlayerName(this.settings), difficultyFor(this.settings))
     this.queue = ticket
     ticket.promise
@@ -309,7 +361,7 @@ export class App {
         const transport = new WebSocketTransport(roomUrl(base, t))
         this.theme = t.theme
         this.beginSession(
-          new Session(this.renderer, this.input, this.hud, this.audio, {
+          this.makeSession({
             config: { mode: 'arena', seed: 0, teams: [[], []] },
             myId: t.you,
             theme: t.theme,
@@ -346,7 +398,7 @@ export class App {
     // The countdown starts under the MATCH FOUND card, so it adds no wait.
     cfg.countdown = 3 + MATCH_FOUND_SECONDS
     this.beginSession(
-      new Session(this.renderer, this.input, this.hud, this.audio, {
+      this.makeSession({
         config: cfg,
         myId: 1,
         theme: this.theme,
@@ -359,7 +411,7 @@ export class App {
 
   startTraining(id: ClassId): void {
     this.beginSession(
-      new Session(this.renderer, this.input, this.hud, this.audio, {
+      this.makeSession({
         config: buildTrainingMatch(id),
         myId: 1,
         theme: this.theme,
@@ -386,6 +438,7 @@ export class App {
     this.session?.dispose()
     this.session = null
     this.input.unlock()
+    this.pointer.enabled = false
     this.state = 'title'
     this.hud.setVisible(false)
     this.pick.setVisible(false)
@@ -400,7 +453,8 @@ export class App {
     this.matchFound.update(dt, this.session?.ready ?? true)
     // Browsers refuse pointer lock without a click (e.g. auto next match):
     // surface the RESUME button instead of leaving the player stuck.
-    if (this.state === 'match' && !this.input.locked && !this.matchFound.visible && !this.shots) {
+    const needsLock = this.state === 'match' && !this.input.classic
+    if (needsLock && !this.input.locked && !this.matchFound.visible && !this.shots) {
       this.unlockedFor += dt
       if (this.unlockedFor > 0.6) this.pause.setVisible(true)
     } else {
@@ -459,6 +513,7 @@ export class App {
     this.hud.setVisible(false)
     this.state = 'results'
     this.input.unlock()
+    this.pointer.enabled = false
     this.pause.setVisible(false)
   }
 }

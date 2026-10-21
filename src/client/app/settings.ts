@@ -1,5 +1,5 @@
 import type { ClassId } from '../../shared/combat/types'
-import { DEFAULT_KEYBINDS, type Keybinds, sanitizeKeybinds } from '../core/keybinds'
+import { type ControlScheme, defaultKeybinds, type Keybinds, sanitizeKeybinds } from '../core/keybinds'
 import type { Quality } from '../core/renderer'
 
 export interface Settings {
@@ -9,6 +9,7 @@ export interface Settings {
   lastClass: ClassId | null
   streak: number // positive = wins in a row, negative = losses
   matches: number
+  controls: ControlScheme
   keybinds: Keybinds
   playerName: string
 }
@@ -21,7 +22,8 @@ const DEFAULTS: Settings = {
   lastClass: null,
   streak: 0,
   matches: 0,
-  keybinds: { ...DEFAULT_KEYBINDS },
+  controls: 'classic',
+  keybinds: defaultKeybinds('classic'),
   playerName: '',
 }
 
@@ -32,7 +34,14 @@ export function loadSettings(): Settings {
     const parsed: unknown = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULTS }
     const merged = { ...DEFAULTS, ...(parsed as Partial<Settings>) }
-    merged.keybinds = sanitizeKeybinds((parsed as { keybinds?: unknown }).keybinds)
+    // Saves from before the classic controls were mouselook bindings: start
+    // those players on the new defaults.
+    const saved = (parsed as { controls?: unknown }).controls
+    merged.controls = saved === 'action' ? 'action' : 'classic'
+    merged.keybinds =
+      saved === undefined
+        ? defaultKeybinds('classic')
+        : sanitizeKeybinds((parsed as { keybinds?: unknown }).keybinds, merged.controls)
     if (typeof merged.playerName !== 'string') merged.playerName = ''
     return merged
   } catch {
