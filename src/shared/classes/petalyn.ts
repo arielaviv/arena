@@ -33,7 +33,7 @@ export const PETALYN_AURAS: readonly AuraDef[] = [
     dispel: 'magic',
     color: '#4ade80',
     glyph: 'leaf',
-    tick: { interval: 1, damage: 15, drain: 1 },
+    tick: { interval: 1, damage: 15, drain: 0.6 },
   },
   {
     id: 'ingrain',
@@ -56,7 +56,7 @@ export const PETALYN_AURAS: readonly AuraDef[] = [
     dispel: 'magic',
     color: '#16a34a',
     glyph: 'spikes',
-    damageTaken: 0.75,
+    damageTaken: 0.8,
     thorns: 35,
   },
 ]
@@ -228,7 +228,7 @@ export const PETALYN: ClassDef = {
       effects: [{ kind: 'aura', aura: 'spiky-shield' }],
       tags: ['defensive'],
       vfx: 'spiky-shield',
-      blurb: 'Ally takes 25% less damage and spikes melee attackers',
+      blurb: 'Ally takes 20% less damage and spikes melee attackers',
     },
     c: LUM_BERRY,
   },

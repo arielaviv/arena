@@ -44,7 +44,7 @@ export const LUMORA_AURAS: readonly AuraDef[] = [
     dispel: 'magic',
     color: '#6d28d9',
     glyph: 'skull',
-    tick: { interval: 1, damage: 27 },
+    tick: { interval: 1, damage: 30 },
   },
 ]
 
@@ -71,7 +71,7 @@ export const LUMORA: ClassDef = {
       mobile: true,
       channel: { duration: 30, interval: 0.15 },
       target: { kind: 'beam', range: 24, radius: 0.35 },
-      effects: [{ kind: 'damage', amount: 18 }],
+      effects: [{ kind: 'damage', amount: 19 }],
       tags: ['primary'],
       vfx: 'psybeam',
       blurb: 'Hold for a continuous beam',

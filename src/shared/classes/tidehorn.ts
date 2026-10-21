@@ -199,7 +199,7 @@ export const TIDEHORN: ClassDef = {
       cooldown: 8,
       target: { kind: 'targeted', range: 40, side: 'ally' },
       effects: [
-        { kind: 'heal', amount: 110 },
+        { kind: 'heal', amount: 135 },
         { kind: 'aura', aura: 'rain-dance' },
       ],
       selfEffects: [{ kind: 'aura', aura: 'tide', stacks: 2 }],
