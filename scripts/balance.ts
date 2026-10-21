@@ -1,6 +1,6 @@
 // Headless AI-vs-AI balance runs on the pure sim.
 // Usage: pnpm tsx scripts/balance.ts [matchesPerComp=20] [difficulty=0.6]
-import { DPS, HEALERS } from '../src/shared/combat/registry'
+import { CLASSES, DPS, getAbility, HEALERS } from '../src/shared/combat/registry'
 import type { ClassId } from '../src/shared/combat/types'
 import { TICK_RATE } from '../src/shared/sim/constants'
 import { MatchSim } from '../src/shared/sim/match'
@@ -22,6 +22,17 @@ for (const h of HEALERS) for (const d of DPS) comps.push([h, d])
 const results = new Map<string, Result>()
 const key = (c: [ClassId, ClassId]) => `${c[0]}+${c[1]}`
 for (const c of comps) results.set(key(c), { wins: 0, games: 0, seconds: 0, timeouts: 0 })
+
+// Per ability: uses, damage and healing (ticks credited to their aura).
+const tally = new Map<string, { uses: number; damage: number; healing: number }>()
+const bump = (id: string) => {
+  let t = tally.get(id)
+  if (!t) {
+    t = { uses: 0, damage: 0, healing: 0 }
+    tally.set(id, t)
+  }
+  return t
+}
 
 let seed = 1
 for (let i = 0; i < comps.length; i++) {
@@ -45,7 +56,11 @@ for (let i = 0; i < comps.length; i++) {
       let ticks = 0
       while (sim.phase !== 'ended' && ticks < MAX_SECONDS * TICK_RATE) {
         sim.step()
-        sim.drainEvents()
+        for (const e of sim.drainEvents()) {
+          if (e.t === 'use') bump(e.ability).uses++
+          else if (e.t === 'damage') bump(e.ability).damage += e.amount
+          else if (e.t === 'heal') bump(e.ability).healing += e.amount
+        }
         ticks++
       }
       const r0 = results.get(key(t0))!
@@ -70,4 +85,27 @@ for (const [k, r] of rows) {
   const pct = ((100 * r.wins) / Math.max(1, r.games)).toFixed(0).padStart(4)
   const avg = (r.seconds / Math.max(1, r.games)).toFixed(0).padStart(6)
   console.log(`${k.padEnd(24)} ${pct}% ${avg}  ${r.timeouts}`)
+}
+
+if (process.argv.includes('--abilities')) {
+  for (const id of [...HEALERS, ...DPS]) {
+    const cls = CLASSES[id]
+    console.log(`
+${cls.name}`)
+    for (const a of Object.values(cls.abilities)) {
+      if (!a) continue
+      const t = tally.get(a.id) ?? { uses: 0, damage: 0, healing: 0 }
+      const auraIds = a.effects.flatMap((e) => (e.kind === 'aura' ? [e.aura] : []))
+      let dot = 0
+      let hot = 0
+      for (const aid of auraIds) {
+        if (aid === a.id || getAbility(aid)) continue
+        dot += tally.get(aid)?.damage ?? 0
+        hot += tally.get(aid)?.healing ?? 0
+      }
+      console.log(
+        `  ${a.slot.padEnd(4)} ${a.name.padEnd(16)} uses ${String(t.uses).padStart(6)}  dmg ${String(t.damage + dot).padStart(8)}  heal ${String(t.healing + hot).padStart(8)}`,
+      )
+    }
+  }
 }
