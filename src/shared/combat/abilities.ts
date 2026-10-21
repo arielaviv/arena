@@ -2,15 +2,17 @@ import { Vector3 } from 'three'
 import { type Aim, coneTarget, handPosition } from '../sim/aim'
 import { segmentVsVertical } from '../sim/collision'
 import { COMBAT, MOVE } from '../sim/constants'
-import { chestY, type Fighter, hasCc, hurtHeight, isIncapacitated } from '../sim/fighter'
+import { chestY, type Fighter, findAura, hasCc, hurtHeight, isBlind, isIncapacitated } from '../sim/fighter'
 import { Btn, held, pressed, SLOT_BUTTON } from '../sim/input'
-import { applyEffects, cancelCast, ULT_MAX } from './effects'
+import { endDash } from '../sim/movement'
+import { applyEffects, cancelCast, consumeStacks, ULT_MAX } from './effects'
+import { spawnHazard } from './entities'
 import type { FailReason } from './events'
 import type { CombatHost } from './host'
-import type { AbilityDef, Effect, Side, Slot } from './types'
+import { type AbilityDef, abilityAt, BLIND_RANGE, type Effect, type Side, type Slot } from './types'
 
 const hand = new Vector3()
-const USE_ORDER: readonly Slot[] = ['c', 'f', 'e', 'q', 'r', 'rmb', 'lmb']
+const USE_ORDER: readonly Slot[] = ['c', 'f', 'e', 'q', 'r', 'a3', 'a2', 'a1', 'rmb', 'lmb']
 
 // Run one tick of ability input for a fighter: focus keys, cast progress,
 // then at most one new ability use.
@@ -25,9 +27,19 @@ export function updateAbilities(host: CombatHost, f: Fighter, aim: Aim, dt: numb
     f.focusAlly = (ally ?? dummyAlly ?? f).id
   }
 
-  if (aim.fighter >= 0) {
-    const under = host.byId(aim.fighter)
-    if (under && under.team !== f.team) f.target = under.id
+  // Tab-target model: the client (or bot) says who is selected.
+  const wantTarget = f.input.target
+  if (wantTarget !== undefined) {
+    if (wantTarget < 0) f.target = -1
+    else {
+      const g = host.byId(wantTarget)
+      if (g?.alive && g.team !== f.team) f.target = g.id
+    }
+  }
+  const wantAlly = f.input.ally
+  if (wantAlly !== undefined && wantAlly >= 0) {
+    const g = host.byId(wantAlly)
+    if (g?.alive && g.team === f.team) f.focusAlly = g.id
   }
   const sticky = host.byId(f.target)
   if (sticky && !sticky.alive) f.target = -1
@@ -48,9 +60,41 @@ function fail(host: CombatHost, f: Fighter, ability: AbilityDef, reason: FailRea
   return false
 }
 
+// The enemy an ability goes to: your selection, else whoever is under the
+// crosshair, else the nearest enemy in front. An auto-pick becomes the selection.
+export function enemyTarget(host: CombatHost, f: Fighter, aim: Aim, range: number): Fighter | null {
+  const sel = host.byId(f.target)
+  if (sel?.alive && sel.team !== f.team) return sel
+  const under = aim.fighter >= 0 ? host.byId(aim.fighter) : undefined
+  let pick: Fighter | null = under?.alive && under.team !== f.team ? under : null
+  pick ??= coneTarget(f, aim, host.world, host.fighters, range, COMBAT.autoTargetAngle, false, false)
+  if (pick) f.target = pick.id
+  return pick
+}
+
+// Range at which an ability locks onto the enemy target, or null if it is
+// aimed freely (lobs, ground zones, ally spells, cones).
+function lockRange(a: AbilityDef): number | null {
+  const t = a.target
+  switch (t.kind) {
+    case 'projectile':
+      return t.gravity || t.hazard || t.side === 'ally' ? null : t.range
+    case 'hitscan':
+    case 'beam':
+      return t.side === 'ally' ? null : t.range
+    case 'targeted':
+      return t.side === 'enemy' ? t.range : null
+    case 'dash':
+      return t.toTarget ? t.distance + 2 : null
+    default:
+      return null
+  }
+}
+
 export function tryUse(host: CombatHost, f: Fighter, slot: Slot, aim: Aim, loud: boolean): boolean {
-  const a = f.cls.abilities[slot]
-  if (!f.alive) return false
+  const a = abilityAt(f.cls, slot)
+  if (!a || !f.alive) return false
+  if (f.auras.some((x) => x.def.noCast)) return fail(host, f, a, 'cc', loud)
   if (isIncapacitated(f) && !a.usableWhileCc) return fail(host, f, a, 'cc', loud)
   if (a.school === 'spell' && hasCc(f, 'silence')) return fail(host, f, a, 'silenced', loud)
   const timed = (a.castTime ?? 0) > 0 || a.channel !== undefined
@@ -66,27 +110,53 @@ export function tryUse(host: CombatHost, f: Fighter, slot: Slot, aim: Aim, loud:
     cancelCast(host, f, 'moved')
   }
 
-  // Targeted spells need a target (and line of sight) before starting.
+  // Pick and validate the target before paying anything.
   let targetId = -1
-  if (a.target.kind === 'targeted') {
-    const ally = a.target.side === 'ally'
-    const angle = ally ? COMBAT.allyAssistAngle : COMBAT.aimAssistAngle
-    let t = coneTarget(f, aim, host.world, host.fighters, a.target.range, angle, ally, false)
-    if (!t && !ally) {
-      const sticky = host.byId(f.target)
-      if (sticky?.alive && inRangeAndSight(host, f, sticky, a.target.range)) t = sticky
-    }
-    if (!t && ally) {
+  const under = aim.fighter >= 0 ? host.byId(aim.fighter) : undefined
+  const underAlly = under?.alive && under.team === f.team && under !== f ? under : null
+  if (a.target.kind === 'targeted' && a.target.side === 'ally') {
+    const range = a.target.range
+    let t: Fighter | null = underAlly && inRangeAndSight(host, f, underAlly, range) ? underAlly : null
+    if (!t) {
       const focus = host.byId(f.focusAlly)
-      t = focus?.alive && inRangeAndSight(host, f, focus, a.target.range) ? focus : f
+      t = focus?.alive && inRangeAndSight(host, f, focus, range) ? focus : f
     }
-    if (!t) return fail(host, f, a, 'target', loud)
     targetId = t.id
+  } else if (a.target.kind === 'projectile' && a.target.side === 'both' && underAlly) {
+    // Pollen Puff on the ally under the cursor.
+    if (!inRangeAndSight(host, f, underAlly, a.target.range)) return fail(host, f, a, 'los', loud)
+    targetId = underAlly.id
+  } else {
+    const range = lockRange(a)
+    const t = range === null ? null : enemyTarget(host, f, aim, range)
+    if (t && range !== null) {
+      const d = Math.hypot(t.pos.x - f.pos.x, t.pos.z - f.pos.z)
+      if (d > range) return fail(host, f, a, 'range', loud)
+      if (
+        (isBlind(f) && d > BLIND_RANGE) ||
+        !host.world.lineOfSight(f.pos.x, f.pos.y + 1.5, f.pos.z, t.pos.x, chestY(t), t.pos.z)
+      ) {
+        return fail(host, f, a, 'los', loud)
+      }
+      targetId = t.id
+    } else if (a.target.kind === 'targeted') {
+      return fail(host, f, a, 'target', loud)
+    }
   }
 
-  if (a.castTime && a.castTime > 0) {
+  let castTime = a.castTime ?? 0
+  if (castTime > 0 && a.castBoost) {
+    const b = a.castBoost
+    const stacks = findAura(f, b.aura)
+    if (stacks && stacks.stacks >= b.need) {
+      castTime *= b.mult
+      consumeStacks(host, f, stacks, b.consume)
+    }
+  }
+
+  if (castTime > 0) {
     if (!f.grounded && !a.mobile) return fail(host, f, a, 'moved', loud)
-    f.cast = { ability: a, elapsed: 0, duration: a.castTime, targetId, channel: false, tickTimer: 0 }
+    f.cast = { ability: a, elapsed: 0, duration: castTime, targetId, channel: false, tickTimer: 0 }
     f.gcd = COMBAT.gcd
     host.emit({ t: 'cast', src: f.id, ability: a.id, action: 'start', target: targetId })
     return true
@@ -109,7 +179,8 @@ export function tryUse(host: CombatHost, f: Fighter, slot: Slot, aim: Aim, loud:
 
 function inRangeAndSight(host: CombatHost, f: Fighter, g: Fighter, range: number): boolean {
   if (g === f) return true
-  if (Math.hypot(g.pos.x - f.pos.x, g.pos.z - f.pos.z) > range) return false
+  const d = Math.hypot(g.pos.x - f.pos.x, g.pos.z - f.pos.z)
+  if (d > range || (isBlind(f) && d > BLIND_RANGE)) return false
   return host.world.lineOfSight(f.pos.x, f.pos.y + 1.5, f.pos.z, g.pos.x, chestY(g), g.pos.z)
 }
 
@@ -149,16 +220,20 @@ function advanceCast(host: CombatHost, f: Fighter, aim: Aim, dt: number): void {
   f.cast = null
   if (c.targetId >= 0 && c.targetId !== f.id) {
     const t = host.byId(c.targetId)
-    const range = a.target.kind === 'targeted' ? a.target.range : 40
+    const range = lockRange(a) ?? (a.target.kind === 'targeted' ? a.target.range : 40)
     if (!t?.alive) {
       fail(host, f, a, 'target', true)
       return
     }
-    if (Math.hypot(t.pos.x - f.pos.x, t.pos.z - f.pos.z) > range + 2) {
+    const d = Math.hypot(t.pos.x - f.pos.x, t.pos.z - f.pos.z)
+    if (d > range + 2) {
       fail(host, f, a, 'range', true)
       return
     }
-    if (!host.world.lineOfSight(f.pos.x, f.pos.y + 1.5, f.pos.z, t.pos.x, chestY(t), t.pos.z)) {
+    if (
+      (isBlind(f) && d > BLIND_RANGE) ||
+      !host.world.lineOfSight(f.pos.x, f.pos.y + 1.5, f.pos.z, t.pos.x, chestY(t), t.pos.z)
+    ) {
       fail(host, f, a, 'los', true)
       return
     }
@@ -206,7 +281,12 @@ function withNth(f: Fighter, a: AbilityDef): readonly Effect[] {
 }
 
 export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: number, aim: Aim): void {
+  resolveTarget(host, f, a, targetId, aim)
+  // After the hit, so a self-debuff (Overheat) can't weaken its own spell.
   if (a.selfEffects) applyEffects(host, f, f, a, a.selfEffects)
+}
+
+function resolveTarget(host: CombatHost, f: Fighter, a: AbilityDef, targetId: number, aim: Aim): void {
   const t = a.target
   switch (t.kind) {
     case 'self':
@@ -218,9 +298,11 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
       const count = t.count ?? 1
       const nth = a.everyNth !== undefined && (f.nthCount + 1) % a.everyNth.n === 0
       if (a.everyNth) f.nthCount++
-      let dx = aim.px - hand.x
-      let dy = aim.py - hand.y
-      let dz = aim.pz - hand.z
+      const locked = host.byId(targetId)
+      const goal = locked?.alive && locked !== f && !t.gravity ? locked : null
+      let dx = (goal ? goal.pos.x : aim.px) - hand.x
+      let dy = (goal ? chestY(goal) : aim.py) - hand.y
+      let dz = (goal ? goal.pos.z : aim.pz) - hand.z
       const len = Math.hypot(dx, dy, dz) || 1
       dx /= len
       dy /= len
@@ -247,19 +329,23 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
           vz: vz * t.speed,
           radius: t.radius,
           gravity: t.gravity ?? 0,
-          range: t.range,
+          // Homing shots chase the target a bit past their nominal range.
+          range: goal ? t.range * 1.6 : t.range,
           side: t.side ?? 'enemy',
           nth,
           alive: true,
+          homing: goal ? goal.id : -1,
         }
         host.projectiles.push(t.hazard ? { ...proj, hazard: t.hazard } : proj)
       }
-      emitUse(host, f, a, aim.px, aim.py, aim.pz, aim.fighter)
+      if (goal) emitUse(host, f, a, goal.pos.x, chestY(goal), goal.pos.z, goal.id)
+      else emitUse(host, f, a, aim.px, aim.py, aim.pz, aim.fighter)
       break
     }
 
     case 'hitscan': {
-      const g = rayFighter(host, f, aim, t.range, 0.25, t.side ?? 'enemy')
+      const locked = host.byId(targetId)
+      const g = locked?.alive ? locked : rayFighter(host, f, aim, t.range, 0.25, t.side ?? 'enemy')
       const ex = g ? g.pos.x : aim.ox + aim.dx * Math.min(aim.dist, t.range)
       const ey = g ? chestY(g) : aim.oy + aim.dy * Math.min(aim.dist, t.range)
       const ez = g ? g.pos.z : aim.oz + aim.dz * Math.min(aim.dist, t.range)
@@ -271,14 +357,16 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
     case 'targeted': {
       const g = host.byId(targetId)
       if (!g?.alive) break
+      if (a.blinkBehind) blinkBehind(host, f, g)
       emitUse(host, f, a, g.pos.x, chestY(g), g.pos.z, g.id)
       applyEffects(host, f, g, a, withNth(f, a))
       break
     }
 
     case 'ground': {
-      let px = aim.px
-      let pz = aim.pz
+      // @cursor casts send the ground point; otherwise use the crosshair.
+      let px = f.input.aimX ?? aim.px
+      let pz = f.input.aimZ ?? aim.pz
       const dx = px - f.pos.x
       const dz = pz - f.pos.z
       const d = Math.hypot(dx, dz)
@@ -289,6 +377,7 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
       const py = host.world.groundHeight(px, pz, aim.py + 1)
       const y = Number.isFinite(py) ? py : 0
       emitUse(host, f, a, px, y, pz, -1)
+      if (t.hazard) spawnHazard(host, f, a, t.hazard, px, y, pz)
       for (const e of a.effects) {
         if (e.kind !== 'delayed') continue
         const id = host.nextId()
@@ -350,8 +439,21 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
         f.comboTimer = a.combo.window
         if (f.comboStep === a.combo.steps) effects = [...effects, ...a.combo.finisher]
       }
-      const fx = Math.cos(f.yaw)
-      const fz = Math.sin(f.yaw)
+      let fx = Math.cos(f.yaw)
+      let fz = Math.sin(f.yaw)
+      if (t.kind === 'melee') {
+        // Swing at your target when it's in reach, whichever way the camera faces.
+        const sel = host.byId(f.target)
+        if (sel?.alive && sel.team !== f.team) {
+          const dx = sel.pos.x - f.pos.x
+          const dz = sel.pos.z - f.pos.z
+          const d = Math.hypot(dx, dz)
+          if (d <= range + 1 && d > 1e-3) {
+            fx = dx / d
+            fz = dz / d
+          }
+        }
+      }
       emitUse(host, f, a, f.pos.x + fx * range, f.pos.y + 1, f.pos.z + fz * range, -1)
       for (const g of host.fighters) {
         if (g === f || !g.alive || !sideMatches(side, f, g)) continue
@@ -373,16 +475,19 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
       let dist: number = t.distance
       let tid = -1
       if (t.toTarget) {
-        const g = coneTarget(
-          f,
-          aim,
-          host.world,
-          host.fighters,
-          t.distance + 2,
-          COMBAT.aimAssistAngle * 1.6,
-          false,
-          false,
-        )
+        const locked = host.byId(targetId)
+        const g = locked?.alive
+          ? locked
+          : coneTarget(
+              f,
+              aim,
+              host.world,
+              host.fighters,
+              t.distance + 2,
+              COMBAT.aimAssistAngle * 1.6,
+              false,
+              false,
+            )
         if (g) {
           dirX = g.pos.x - f.pos.x
           dirZ = g.pos.z - f.pos.z
@@ -401,7 +506,14 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
     }
 
     case 'beam': {
-      const g = rayFighter(host, f, aim, t.range, t.radius, t.side ?? 'enemy')
+      // A locked beam stays on its target while it is in range and sight.
+      const locked = host.byId(targetId)
+      const g =
+        targetId >= 0
+          ? locked?.alive && inRangeAndSight(host, f, locked, t.range + 2)
+            ? locked
+            : null
+          : rayFighter(host, f, aim, t.range, t.radius, t.side ?? 'enemy')
       handPosition(f, hand)
       const ex = g ? g.pos.x : aim.ox + aim.dx * Math.min(aim.dist, t.range)
       const ey = g ? chestY(g) : aim.oy + aim.dy * Math.min(aim.dist, t.range)
@@ -421,6 +533,27 @@ export function resolve(host: CombatHost, f: Fighter, a: AbilityDef, targetId: n
       if (g) applyEffects(host, f, g, a, a.effects)
       break
     }
+  }
+}
+
+// Shadow Sneak: step out of the target's shadow, facing its back. Falls back
+// to striking from where you stand if a wall is in the way.
+function blinkBehind(host: CombatHost, f: Fighter, g: Fighter): void {
+  const bx = -Math.cos(g.yaw)
+  const bz = -Math.sin(g.yaw)
+  for (const back of [1.4, 0.9]) {
+    const x = g.pos.x + bx * back
+    const z = g.pos.z + bz * back
+    if (!host.world.lineOfSight(g.pos.x, g.pos.y + 1, g.pos.z, x, g.pos.y + 1, z)) continue
+    const y = host.world.groundHeight(x, z, g.pos.y + 1.5)
+    if (!Number.isFinite(y)) continue
+    cancelCast(host, f, 'moved')
+    endDash(f)
+    f.pos.set(x, y, z)
+    f.vel.set(0, 0, 0)
+    host.world.resolveCapsule(f.pos, MOVE.radius, hurtHeight(f), MOVE.step)
+    f.yaw = Math.atan2(g.pos.z - f.pos.z, g.pos.x - f.pos.x)
+    return
   }
 }
 

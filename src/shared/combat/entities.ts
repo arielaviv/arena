@@ -60,6 +60,20 @@ export function updateProjectiles(host: CombatHost, dt: number): void {
   for (const p of host.projectiles) {
     if (!p.alive) continue
     const owner = host.byId(p.owner)
+    const chase = p.homing >= 0 ? host.byId(p.homing) : undefined
+    if (chase?.alive) {
+      // Fly straight at the target's chest.
+      const speed = Math.hypot(p.vx, p.vy, p.vz)
+      const hx = chase.pos.x - p.x
+      const hy = chestY(chase) - p.y
+      const hz = chase.pos.z - p.z
+      const hl = Math.hypot(hx, hy, hz) || 1
+      p.vx = (hx / hl) * speed
+      p.vy = (hy / hl) * speed
+      p.vz = (hz / hl) * speed
+    } else if (p.homing >= 0) {
+      p.homing = -1 // target died: fly on and hit whatever is in the way
+    }
     p.vy -= p.gravity * dt
     const sx = p.vx * dt
     const sy = p.vy * dt
@@ -80,6 +94,7 @@ export function updateProjectiles(host: CombatHost, dt: number): void {
     let tFighter = Number.POSITIVE_INFINITY
     for (const g of host.fighters) {
       if (!g.alive || !sideOk(p.side, p.team, p.owner, g)) continue
+      if (p.homing >= 0 && g.id !== p.homing) continue
       const r = MOVE.radius + p.radius
       const c = segmentVsVertical(
         p.x,
@@ -171,7 +186,7 @@ export function updateHazards(host: CombatHost, dt: number): void {
       if (Math.hypot(g.pos.x - h.x, g.pos.z - h.z) > h.def.radius + MOVE.radius) continue
       if (Math.abs(g.pos.y - h.y) > 2.5) continue
       h.hit.push(g.id)
-      applyEffects(host, owner, g, h.ability, h.def.effects)
+      applyEffects(host, owner, g, h.ability, h.def.effects, true)
     }
   }
   compact(host.hazards, (h) => h.remaining > 0)
@@ -208,7 +223,7 @@ export function updateDelayed(host: CombatHost, dt: number): void {
       if (Math.hypot(g.pos.x - d.x, g.pos.z - d.z) > d.radius + MOVE.radius) continue
       if (Math.abs(g.pos.y - d.y) > 3) continue
       if (!host.world.lineOfSight(d.x, d.y + 1, d.z, g.pos.x, chestY(g), g.pos.z)) continue
-      applyEffects(host, owner, g, d.ability, d.effects)
+      applyEffects(host, owner, g, d.ability, d.effects, true)
     }
   }
   compact(host.delayed, (d) => d.remaining > 0)

@@ -291,7 +291,7 @@ export class MatchSim implements CombatHost {
   }
 }
 
-const ALL_BUTTONS = (1 << 11) - 1
+const ALL_BUTTONS = (1 << 14) - 1
 
 function finite(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v)
@@ -310,5 +310,15 @@ export function sanitizeInput(cmd: InputCmd, prev: InputCmd): InputCmd | null {
     yaw: finite(cmd.yaw) ? cmd.yaw % (Math.PI * 64) : prev.yaw,
     pitch: clamp(cmd.pitch, CAMERA.pitchMin, CAMERA.pitchMax, prev.pitch),
     buttons: finite(cmd.buttons) ? Math.floor(cmd.buttons) & ALL_BUTTONS : 0,
+    // Missing = keep the current selection (older clients never send these).
+    target: finite(cmd.target) ? Math.floor(cmd.target) : undefined,
+    ally: finite(cmd.ally) ? Math.floor(cmd.ally) : undefined,
+    ...(finite(cmd.aimX) && finite(cmd.aimY) && finite(cmd.aimZ)
+      ? {
+          aimX: clamp(cmd.aimX, -200, 200, 0),
+          aimY: clamp(cmd.aimY, -20, 60, 0),
+          aimZ: clamp(cmd.aimZ, -200, 200, 0),
+        }
+      : {}),
   }
 }

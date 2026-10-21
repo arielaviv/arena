@@ -22,6 +22,7 @@ export interface Projectile {
   hazard?: HazardDef
   nth: boolean
   alive: boolean
+  homing: number // fighter id it chases and only it can hit, -1 = free flight
 }
 
 export interface Hazard {

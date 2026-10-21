@@ -47,5 +47,5 @@ export const COMBAT = {
   drReset: 15,
   meleeRange: 3.6,
   aimAssistAngle: 0.1, // radians, cone for targeted spells
-  allyAssistAngle: 0.16,
+  autoTargetAngle: 0.6, // nearest enemy in front when nothing is selected
 } as const
