@@ -46,13 +46,39 @@ export function updateAbilities(host: CombatHost, f: Fighter, aim: Aim, dt: numb
 
   if (f.cast) advanceCast(host, f, aim, dt)
 
+  if (f.queued) {
+    f.queueTimer -= dt
+    const slot = f.queued
+    if (f.queueTimer <= 0) f.queued = null
+    else if (tryUse(host, f, slot, aim, false)) {
+      f.queued = null
+      return
+    }
+  }
+
   for (const slot of USE_ORDER) {
     const bit = SLOT_BUTTON[slot]
     if (!held(b, bit)) continue
     const isPress = pressed(b, prev, bit)
     if (f.cast && f.cast.ability.slot === slot) continue
     if (tryUse(host, f, slot, aim, isPress)) break
+    if (isPress && slot !== 'lmb' && waitsForGcd(f, slot)) {
+      f.queued = slot
+      f.queueTimer = COMBAT.spellQueue
+    }
   }
+}
+
+// Blocked only by the global cooldown or a cast in progress (worth queueing).
+function waitsForGcd(f: Fighter, slot: Slot): boolean {
+  const a = abilityAt(f.cls, slot)
+  if (!a || a.offGcd) return false
+  return f.gcd > 0 || (f.cast !== null && !isPrimaryChannel(f))
+}
+
+// A held primary channel (Psybeam) gives way to any other ability.
+function isPrimaryChannel(f: Fighter): boolean {
+  return f.cast?.channel === true && f.cast.ability.slot === 'lmb'
 }
 
 function fail(host: CombatHost, f: Fighter, ability: AbilityDef, reason: FailReason, loud: boolean): false {
@@ -106,8 +132,17 @@ export function tryUse(host: CombatHost, f: Fighter, slot: Slot, aim: Aim, loud:
   if (isUlt && f.ult < ULT_MAX) return fail(host, f, a, 'resource', loud)
   if (f.dash) return false
   if (f.cast) {
-    if (!a.offGcd) return false
-    cancelCast(host, f, 'moved')
+    if (isPrimaryChannel(f) && a.slot !== 'lmb') {
+      host.emit({
+        t: 'cast',
+        src: f.id,
+        ability: f.cast.ability.id,
+        action: 'success',
+        target: f.cast.targetId,
+      })
+      f.cast = null
+    } else if (!a.offGcd) return false
+    else cancelCast(host, f, 'moved')
   }
 
   // Pick and validate the target before paying anything.

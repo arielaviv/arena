@@ -88,7 +88,11 @@ export interface Fighter {
   input: InputCmd
   lastSeq: number
   focusAlly: number
-  target: number // sticky enemy target: last enemy under the crosshair
+  target: number // selected enemy (tab target, click, or auto-picked on cast)
+  // Spell queue: a key tapped during the global cooldown or a cast fires
+  // as soon as it can, within the window.
+  queued: Slot | null
+  queueTimer: number
   confuseYaw: number
   combatTimer: number
   stats: FighterStats
@@ -158,6 +162,8 @@ export function makeFighter(
     lastSeq: 0,
     focusAlly: id,
     target: -1,
+    queued: null,
+    queueTimer: 0,
     confuseYaw: 0,
     combatTimer: 0,
     stats: { damage: 0, healing: 0, interrupts: 0, cc: 0 },

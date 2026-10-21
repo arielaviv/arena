@@ -48,4 +48,5 @@ export const COMBAT = {
   meleeRange: 3.6,
   aimAssistAngle: 0.1, // radians, cone for targeted spells
   autoTargetAngle: 0.6, // nearest enemy in front when nothing is selected
+  spellQueue: 0.4, // seconds a tapped key waits for the global cooldown
 } as const
