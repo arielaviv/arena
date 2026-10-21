@@ -14,6 +14,7 @@ import {
   type Material,
   Mesh,
   MeshToonMaterial,
+  NormalBlending,
   PlaneGeometry,
   Points,
   ShaderMaterial,
@@ -172,7 +173,7 @@ export function driftParticles(
   const material = new ShaderMaterial({
     transparent: true,
     depthWrite: false,
-    blending: additive ? AdditiveBlending : undefined,
+    blending: additive ? AdditiveBlending : NormalBlending,
     uniforms: {
       uTime: { value: 0 },
       uColor: { value: new Color(color) },

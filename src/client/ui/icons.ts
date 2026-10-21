@@ -36,6 +36,14 @@ const PATHS: Record<string, string> = {
   teleport: 'M12 3 v4 M12 17 v4 M3 12 h4 M17 12 h4 M6 6 l3 3 M15 15 l3 3 M6 18 l3 -3 M15 9 l3 -3',
   fang: 'M5 5 h14 l-3 6 -2 -3 -2 8 -2 -8 -2 3 Z',
   cast: 'M12 12 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 M12 7 v5 l3 2',
+  heat: 'M12 3 c3 4 5 6 5 10 a5 5 0 0 1 -10 0 c0 -2 1 -4 2 -5 M5 21 h14',
+  wisp: 'M12 3 c3 4 5 6 5 10 a5 5 0 0 1 -10 0 c0 -2 1 -3 2 -4 M10 14 h0.01 M14 14 h0.01',
+  reflect: 'M4 12 a8 8 0 0 1 14 -5 M18 3 v4 h-4 M20 12 a8 8 0 0 1 -14 5 M6 21 v-4 h4',
+  spikes: 'M12 2 l2 6 6 -2 -2 6 6 2 -6 2 2 6 -6 -2 -2 6 -2 -6 -6 2 2 -6 -6 -2 6 -2 -2 -6 6 2 Z',
+  smoke: 'M5 17 a4 4 0 0 1 2 -7.5 a5 5 0 0 1 9.5 1 a3.5 3.5 0 0 1 2.5 6.5 Z',
+  seed: 'M12 4 c4 3 5 8 0 16 c-5 -8 -4 -13 0 -16 Z M12 8 v8',
+  moon: 'M20 14 A8 8 0 1 1 10 4 a6 6 0 0 0 10 10 Z',
+  rain: 'M6 13 a4 4 0 0 1 1 -8 a5 5 0 0 1 10 1 a3 3 0 0 1 0 7 Z M8 17 l-1 3 M12 17 l-1 3 M16 17 l-1 3',
 }
 
 export function iconSvg(name: string, color = 'currentColor', size = 22): string {
@@ -75,6 +83,21 @@ const ABILITY_ICON: Record<string, string> = {
   'vine-whip': 'leaf',
   'jungle-healing': 'heal',
   'lum-berry': 'berry',
+  'will-o-wisp': 'wisp',
+  'heat-wave': 'wave',
+  overheat: 'heat',
+  scald: 'drop',
+  'rain-dance': 'rain',
+  withdraw: 'shield',
+  venoshock: 'poison',
+  smokescreen: 'smoke',
+  'shadow-sneak': 'teleport',
+  'magic-coat': 'reflect',
+  'dream-eater': 'moon',
+  nightmare: 'skull',
+  'leech-seed': 'seed',
+  ingrain: 'root',
+  'spiky-shield': 'spikes',
 }
 
 export function abilityIcon(a: AbilityDef): string {
