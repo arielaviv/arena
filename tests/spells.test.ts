@@ -198,4 +198,27 @@ describe('new spells', () => {
     const events = tap(sim, foe, Btn.Rmb, { target: me })
     expect(events.some((e) => e.t === 'cast' && e.action === 'fail' && e.reason === 'los')).toBe(true)
   })
+
+  it('a key tapped during the global cooldown still fires (spell queue)', () => {
+    const { sim, me, foe } = duel('cindrake', 'tidehorn')
+    place(me, -6, 0)
+    place(foe, 6, 0)
+    press(sim, me, Btn.Lmb, { target: foe })
+    run(sim, 1)
+    expect(me.gcd).toBeGreaterThan(0)
+    tap(sim, me, Btn.A1, { target: foe }, 30)
+    expect(findAura(foe, 'will-o-wisp')).toBeDefined()
+  })
+
+  it('a held Psybeam gives way to other spells', () => {
+    const { sim, me, foe } = duel('lumora', 'cindrake')
+    place(me, -6, 0)
+    place(foe, 6, 0)
+    press(sim, me, Btn.Lmb, { target: foe })
+    run(sim, 10)
+    expect(me.cast?.ability.id).toBe('psybeam')
+    press(sim, me, Btn.Lmb | Btn.A3, { target: foe })
+    run(sim, 3)
+    expect(findAura(foe, 'nightmare')).toBeDefined()
+  })
 })
