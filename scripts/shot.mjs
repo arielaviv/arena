@@ -44,6 +44,21 @@ for (const step of steps) {
   const arg = i < 0 ? '' : step.slice(i + 1)
   if (kind === 'click') await page.locator(`text=${arg} >> visible=true`).first().click()
   else if (kind === 'key') await page.keyboard.press(arg)
+  else if (kind === 'mouse') {
+    // mouse:x,y[,right]
+    const [x, y, which] = arg.split(',')
+    await page.mouse.click(Number(x), Number(y), { button: which === 'right' ? 'right' : 'left', delay: 60 })
+  } else if (kind === 'move') {
+    const [x, y] = arg.split(',')
+    await page.mouse.move(Number(x), Number(y))
+  } else if (kind === 'drag') {
+    // drag:x,y,dx,dy
+    const [x, y, dx, dy] = arg.split(',').map(Number)
+    await page.mouse.move(x, y)
+    await page.mouse.down({ button: 'right' })
+    for (let k = 1; k <= 10; k++) await page.mouse.move(x + (dx * k) / 10, y + (dy * k) / 10)
+    await page.mouse.up({ button: 'right' })
+  }
   else if (kind === 'wait') await wait(Number(arg))
   else if (kind === 'shot') await shot(arg)
   else if (kind === 'eval') console.log(await page.evaluate(arg))
